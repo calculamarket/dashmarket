@@ -389,6 +389,7 @@ export function DashmarketDashboard() {
   const [realProducts, setRealProducts] = useState<ProductRow[]>([]);
   const [dataMessage, setDataMessage] = useState<string | null>(null);
   const [isSavingCost, setIsSavingCost] = useState(false);
+  const [isConnectingMarketplace, setIsConnectingMarketplace] = useState(false);
   const [costForm, setCostForm] = useState({
     sku: salesSeed[0].sku,
     label: "",
@@ -642,6 +643,53 @@ export function DashmarketDashboard() {
     setDataMessage("Sessao encerrada.");
   }
 
+  async function connectMercadoLivre() {
+    if (!organization) {
+      setDataMessage("Entre no DASHMARKET antes de conectar o Mercado Livre.");
+      return;
+    }
+
+    setIsConnectingMarketplace(true);
+    setDataMessage(null);
+
+    try {
+      const response = await fetch(
+        `/api/marketplaces/mercadolivre/auth-url?organizationId=${organization.id}&siteId=MLB`
+      );
+      const payload = (await response.json()) as { url?: string; error?: string };
+
+      if (!response.ok || !payload.url) {
+        throw new Error(payload.error ?? "Nao foi possivel iniciar a conexao.");
+      }
+
+      window.location.href = payload.url;
+    } catch (error) {
+      setDataMessage(
+        error instanceof Error
+          ? error.message
+          : "Nao foi possivel conectar o Mercado Livre."
+      );
+      setIsConnectingMarketplace(false);
+    }
+  }
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const status = params.get("ml_status");
+
+    if (!status) return;
+
+    const messages: Record<string, string> = {
+      connected: "Mercado Livre conectado com sucesso.",
+      invalid_callback: "Retorno do Mercado Livre invalido.",
+      missing_env: "Variaveis do Mercado Livre nao configuradas no ambiente.",
+      connection_error: "Nao foi possivel concluir a conexao com o Mercado Livre."
+    };
+
+    setDataMessage(messages[status] ?? "Retorno do Mercado Livre recebido.");
+    window.history.replaceState({}, "", window.location.pathname);
+  }, []);
+
   return (
     <main className="min-h-screen bg-paper text-ink">
       <div className="flex min-h-screen flex-col lg:flex-row">
@@ -729,6 +777,19 @@ export function DashmarketDashboard() {
                 </span>
               ))}
             </div>
+            <button
+              className="mt-4 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-white px-3 text-sm font-bold text-ink hover:bg-paper"
+              disabled={
+                selectedProvider !== "mercadolivre" ||
+                supabaseStatus !== "connected" ||
+                isConnectingMarketplace
+              }
+              onClick={connectMercadoLivre}
+              type="button"
+            >
+              <Cable aria-hidden className="h-4 w-4" />
+              {isConnectingMarketplace ? "Conectando" : "Conectar Mercado Livre"}
+            </button>
           </section>
         </aside>
 
@@ -762,10 +823,17 @@ export function DashmarketDashboard() {
               </div>
               <button
                 className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-sea px-4 text-sm font-bold text-white shadow-sm hover:bg-teal-800"
+                onClick={
+                  selectedProvider === "mercadolivre"
+                    ? connectMercadoLivre
+                    : undefined
+                }
                 type="button"
               >
                 <RefreshCw aria-hidden className="h-4 w-4" />
-                Sincronizar
+                {selectedProvider === "mercadolivre"
+                  ? "Conectar ML"
+                  : "Sincronizar"}
               </button>
             </div>
           </header>
