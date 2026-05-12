@@ -683,7 +683,10 @@ export function DashmarketDashboard() {
       connected: "Mercado Livre conectado com sucesso.",
       invalid_callback: "Retorno do Mercado Livre invalido.",
       missing_env: "Variaveis do Mercado Livre nao configuradas no ambiente.",
-      connection_error: "Nao foi possivel concluir a conexao com o Mercado Livre."
+      connection_error: "Nao foi possivel concluir a conexao com o Mercado Livre.",
+      token_error: "Mercado Livre recusou a troca do codigo. Confira Client ID, Client Secret e URL de callback.",
+      user_error: "Conexao autorizada, mas nao foi possivel ler o vendedor no Mercado Livre.",
+      save_error: "Conexao autorizada, mas nao foi possivel salvar a conta no Supabase."
     };
 
     setDataMessage(messages[status] ?? "Retorno do Mercado Livre recebido.");
