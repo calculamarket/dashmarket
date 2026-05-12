@@ -65,6 +65,16 @@ type SyncListingsSummary = {
   syncedAt: string;
 };
 
+type SyncOrdersSummary = {
+  accountName: string;
+  daysBack: number;
+  remoteTotal: number;
+  syncedOrders: number;
+  syncedItems: number;
+  grossAmount: number;
+  syncedAt: string;
+};
+
 type CostCenterRow = {
   id: string;
   cost_name: string;
@@ -74,6 +84,16 @@ type CostCenterRow = {
   valid_from: string;
   valid_to: string | null;
   products: ProductRow | ProductRow[] | null;
+};
+
+type OrderItemRow = {
+  seller_sku: string | null;
+  title: string;
+  quantity: number | string;
+  gross_amount: number | string;
+  marketplace_fee_amount: number | string;
+  shipping_cost_amount: number | string;
+  discount_amount: number | string;
 };
 
 const salesSeed: SaleRecord[] = [
@@ -388,6 +408,11 @@ function mapCostCenterRow(row: CostCenterRow): SkuCost | null {
   };
 }
 
+function numberFromDb(value: number | string | null | undefined) {
+  const numeric = typeof value === "number" ? value : Number(value ?? 0);
+  return Number.isFinite(numeric) ? numeric : 0;
+}
+
 export function DashmarketDashboard() {
   const [supabaseClient] = useState(() => {
     try {
@@ -406,6 +431,7 @@ export function DashmarketDashboard() {
   const [supabaseStatus, setSupabaseStatus] =
     useState<SupabaseStatus>("checking");
   const [realProducts, setRealProducts] = useState<ProductRow[]>([]);
+  const [realSales, setRealSales] = useState<SaleRecord[]>([]);
   const [marketplaceAccounts, setMarketplaceAccounts] = useState<
     MarketplaceAccountRow[]
   >([]);
@@ -413,9 +439,12 @@ export function DashmarketDashboard() {
   const [isSavingCost, setIsSavingCost] = useState(false);
   const [isConnectingMarketplace, setIsConnectingMarketplace] = useState(false);
   const [isSyncingListings, setIsSyncingListings] = useState(false);
+  const [isSyncingOrders, setIsSyncingOrders] = useState(false);
   const [syncSummary, setSyncSummary] = useState<SyncListingsSummary | null>(
     null
   );
+  const [ordersSyncSummary, setOrdersSyncSummary] =
+    useState<SyncOrdersSummary | null>(null);
   const [costForm, setCostForm] = useState({
     sku: salesSeed[0].sku,
     label: "",
@@ -425,6 +454,7 @@ export function DashmarketDashboard() {
     validFrom: "2026-05-01"
   });
 
+  const activeSales = realSales.length > 0 ? realSales : salesSeed;
   const productOptions = useMemo(
     () =>
       realProducts.length > 0
@@ -432,17 +462,27 @@ export function DashmarketDashboard() {
             sku: product.internal_sku,
             title: product.title
           }))
-        : salesSeed.map((sale) => ({ sku: sale.sku, title: sale.title })),
-    [realProducts]
+        : activeSales.map((sale) => ({ sku: sale.sku, title: sale.title })),
+    [activeSales, realProducts]
   );
+
+  useEffect(() => {
+    if (productOptions.length === 0) return;
+
+    setCostForm((current) =>
+      productOptions.some((product) => product.sku === current.sku)
+        ? current
+        : { ...current, sku: productOptions[0].sku }
+    );
+  }, [productOptions]);
 
   const selectedAdapter = getMarketplaceAdapter(selectedProvider);
   const mercadoLivreAccount = marketplaceAccounts.find(
     (account) => account.provider === "mercadolivre" && account.status === "connected"
   );
   const marginRows = useMemo(
-    () => calculateContributionMargins(salesSeed, costs, adSpendSeed),
-    [costs]
+    () => calculateContributionMargins(activeSales, costs, adSpendSeed),
+    [activeSales, costs]
   );
 
   const filteredMargins = marginRows.filter((row) => {
@@ -513,6 +553,49 @@ export function DashmarketDashboard() {
     setCosts(mappedCosts);
   }, [supabaseClient]);
 
+  const loadSales = useCallback(async (organizationId: string) => {
+    if (!supabaseClient) return;
+
+    const { data, error } = await supabaseClient
+      .from("order_items")
+      .select(
+        "seller_sku, title, quantity, gross_amount, marketplace_fee_amount, shipping_cost_amount, discount_amount"
+      )
+      .eq("organization_id", organizationId)
+      .limit(2000);
+
+    if (error) throw error;
+
+    const salesBySku = new Map<string, SaleRecord>();
+
+    for (const row of (data ?? []) as OrderItemRow[]) {
+      const sku = row.seller_sku ?? "SKU sem codigo";
+      const current =
+        salesBySku.get(sku) ??
+        ({
+          sku,
+          title: row.title,
+          units: 0,
+          orders: 0,
+          grossRevenue: 0,
+          marketplaceFees: 0,
+          shippingCosts: 0,
+          discounts: 0,
+          taxes: 0
+        } satisfies SaleRecord);
+
+      current.units += numberFromDb(row.quantity);
+      current.orders += 1;
+      current.grossRevenue += numberFromDb(row.gross_amount);
+      current.marketplaceFees += numberFromDb(row.marketplace_fee_amount);
+      current.shippingCosts += numberFromDb(row.shipping_cost_amount);
+      current.discounts += numberFromDb(row.discount_amount);
+      salesBySku.set(sku, current);
+    }
+
+    setRealSales(Array.from(salesBySku.values()));
+  }, [supabaseClient]);
+
   const loadMarketplaceAccounts = useCallback(async (organizationId: string) => {
     if (!supabaseClient) return;
 
@@ -535,6 +618,7 @@ export function DashmarketDashboard() {
     async function loadWorkspace() {
       if (!supabaseClient) {
         setSupabaseStatus("demo");
+        setRealSales([]);
         setCosts(costsSeed);
         return;
       }
@@ -552,6 +636,7 @@ export function DashmarketDashboard() {
           setUserEmail(null);
           setOrganization(null);
           setRealProducts([]);
+          setRealSales([]);
           setCosts(costsSeed);
           return;
         }
@@ -576,15 +661,18 @@ export function DashmarketDashboard() {
 
         if (currentOrganization) {
           await loadCostCenter(currentOrganization.id);
+          await loadSales(currentOrganization.id);
           await loadMarketplaceAccounts(currentOrganization.id);
         } else {
           setCosts([]);
+          setRealSales([]);
           setMarketplaceAccounts([]);
           setDataMessage("Usuario autenticado, mas sem empresa vinculada.");
         }
       } catch (error) {
         if (!isMounted) return;
         setSupabaseStatus("error");
+        setRealSales([]);
         setCosts(costsSeed);
         setDataMessage(
           error instanceof Error
@@ -599,7 +687,7 @@ export function DashmarketDashboard() {
     return () => {
       isMounted = false;
     };
-  }, [loadCostCenter, loadMarketplaceAccounts, supabaseClient]);
+  }, [loadCostCenter, loadMarketplaceAccounts, loadSales, supabaseClient]);
 
   async function addCost(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -616,14 +704,14 @@ export function DashmarketDashboard() {
         );
 
         if (!product) {
-          const seedProduct = salesSeed.find((sale) => sale.sku === costForm.sku);
+          const saleProduct = activeSales.find((sale) => sale.sku === costForm.sku);
           const { data: insertedProduct, error: productError } =
             await supabaseClient
               .from("products")
               .insert({
                 organization_id: organization.id,
                 internal_sku: costForm.sku,
-                title: seedProduct?.title ?? costForm.sku
+                title: saleProduct?.title ?? costForm.sku
               })
               .select("id, internal_sku, title")
               .single();
@@ -686,8 +774,10 @@ export function DashmarketDashboard() {
     setUserEmail(null);
     setOrganization(null);
     setRealProducts([]);
+    setRealSales([]);
     setMarketplaceAccounts([]);
     setSyncSummary(null);
+    setOrdersSyncSummary(null);
     setCosts(costsSeed);
     setDataMessage("Sessao encerrada.");
   }
@@ -775,6 +865,64 @@ export function DashmarketDashboard() {
       );
     } finally {
       setIsSyncingListings(false);
+    }
+  }
+
+  async function syncMercadoLivreOrders() {
+    if (!supabaseClient || !organization) {
+      setDataMessage("Entre no DASHMARKET antes de sincronizar vendas.");
+      return;
+    }
+
+    setIsSyncingOrders(true);
+    setDataMessage(null);
+
+    try {
+      const { data: sessionData, error: sessionError } =
+        await supabaseClient.auth.getSession();
+
+      if (sessionError) throw sessionError;
+
+      const accessToken = sessionData.session?.access_token;
+      if (!accessToken) throw new Error("Sessao expirada. Entre novamente.");
+
+      const response = await fetch("/api/marketplaces/mercadolivre/sync-orders", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({ organizationId: organization.id, daysBack: 30 })
+      });
+
+      const payload = (await response.json()) as
+        | SyncOrdersSummary
+        | { error?: string };
+
+      if (!response.ok) {
+        throw new Error(
+          "error" in payload && payload.error
+            ? payload.error
+            : "Nao foi possivel sincronizar vendas."
+        );
+      }
+
+      const summary = payload as SyncOrdersSummary;
+      setOrdersSyncSummary(summary);
+      setDataMessage(
+        `Vendas sincronizadas: ${summary.syncedOrders} pedidos e ${summary.syncedItems} itens dos ultimos ${summary.daysBack} dias.`
+      );
+      await loadCostCenter(organization.id);
+      await loadSales(organization.id);
+      await loadMarketplaceAccounts(organization.id);
+    } catch (error) {
+      setDataMessage(
+        error instanceof Error
+          ? error.message
+          : "Nao foi possivel sincronizar vendas."
+      );
+    } finally {
+      setIsSyncingOrders(false);
     }
   }
 
@@ -901,7 +1049,8 @@ export function DashmarketDashboard() {
                 selectedProvider !== "mercadolivre" ||
                 supabaseStatus !== "connected" ||
                 isConnectingMarketplace ||
-                isSyncingListings
+                isSyncingListings ||
+                isSyncingOrders
               }
               onClick={
                 mercadoLivreAccount ? syncMercadoLivreListings : connectMercadoLivre
@@ -917,6 +1066,22 @@ export function DashmarketDashboard() {
                     ? "Sincronizar SKUs"
                     : "Conectar Mercado Livre"}
             </button>
+            {mercadoLivreAccount && (
+              <button
+                className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-teal-200 px-3 text-sm font-bold text-ink hover:bg-teal-100"
+                disabled={
+                  selectedProvider !== "mercadolivre" ||
+                  supabaseStatus !== "connected" ||
+                  isSyncingListings ||
+                  isSyncingOrders
+                }
+                onClick={syncMercadoLivreOrders}
+                type="button"
+              >
+                <ClipboardList aria-hidden className="h-4 w-4" />
+                {isSyncingOrders ? "Sincronizando" : "Sincronizar Vendas"}
+              </button>
+            )}
           </section>
         </aside>
 
@@ -961,7 +1126,8 @@ export function DashmarketDashboard() {
                   selectedProvider !== "mercadolivre" ||
                   supabaseStatus !== "connected" ||
                   isConnectingMarketplace ||
-                  isSyncingListings
+                  isSyncingListings ||
+                  isSyncingOrders
                 }
                 type="button"
               >
@@ -974,6 +1140,21 @@ export function DashmarketDashboard() {
                     ? "Conectar ML"
                     : "Sincronizar"}
               </button>
+              {mercadoLivreAccount && selectedProvider === "mercadolivre" && (
+                <button
+                  className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-ink px-4 text-sm font-bold text-white shadow-sm hover:bg-black"
+                  disabled={
+                    supabaseStatus !== "connected" ||
+                    isSyncingListings ||
+                    isSyncingOrders
+                  }
+                  onClick={syncMercadoLivreOrders}
+                  type="button"
+                >
+                  <ClipboardList aria-hidden className="h-4 w-4" />
+                  {isSyncingOrders ? "Sincronizando" : "Sincronizar Vendas"}
+                </button>
+              )}
             </div>
           </header>
 
@@ -1043,7 +1224,9 @@ export function DashmarketDashboard() {
               </p>
               <p className="mt-1 text-black/60">
                 {dataMessage ??
-                  "Custos cadastrados nesta tela ja sao salvos no banco. Vendas, estoque e publicidade seguem demonstrativos ate conectarmos o Mercado Livre."}
+                  (realSales.length > 0
+                    ? "A margem ja esta usando vendas reais sincronizadas do Mercado Livre."
+                    : "Custos cadastrados nesta tela ja sao salvos no banco. Vendas, estoque e publicidade seguem demonstrativos ate sincronizarmos o Mercado Livre.")}
               </p>
               {syncSummary && (
                 <div className="mt-3 grid gap-2 sm:grid-cols-4">
@@ -1068,6 +1251,29 @@ export function DashmarketDashboard() {
                   ))}
                 </div>
               )}
+              {ordersSyncSummary && (
+                <div className="mt-3 grid gap-2 sm:grid-cols-4">
+                  {[
+                    ["Pedidos", formatNumber.format(ordersSyncSummary.syncedOrders)],
+                    ["Itens", formatNumber.format(ordersSyncSummary.syncedItems)],
+                    ["Receita", formatCurrency.format(ordersSyncSummary.grossAmount)],
+                    [
+                      "Periodo",
+                      `${formatNumber.format(ordersSyncSummary.daysBack)} dias`
+                    ]
+                  ].map(([label, value]) => (
+                    <div
+                      className="rounded-lg bg-emerald-50 px-3 py-2 ring-1 ring-emerald-100"
+                      key={label}
+                    >
+                      <p className="text-xs font-bold uppercase tracking-normal text-black/45">
+                        {label}
+                      </p>
+                      <p className="mt-1 font-semibold text-ink">{value}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
             </section>
           )}
 
@@ -1082,7 +1288,9 @@ export function DashmarketDashboard() {
                 </div>
                 <span className="inline-flex h-8 items-center gap-2 rounded-lg bg-emerald-50 px-3 text-sm font-semibold text-sea ring-1 ring-emerald-100">
                   <PackageCheck aria-hidden className="h-4 w-4" />
-                  Base preparada para conciliar pedidos
+                  {realSales.length > 0
+                    ? "Vendas reais em uso"
+                    : "Base preparada para conciliar pedidos"}
                 </span>
               </div>
               <div className="table-scroll overflow-x-auto">
