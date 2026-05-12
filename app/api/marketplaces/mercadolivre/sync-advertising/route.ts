@@ -64,6 +64,7 @@ type ProductAdsCampaign = {
   strategy?: string | null;
   channel?: string | null;
   metrics?: MetricPayload;
+  metrics_summary?: MetricPayload;
 };
 
 type ProductAdsCampaignsResponse = {
@@ -81,7 +82,8 @@ type ProductAdsItem = {
   title?: string | null;
   status?: string | null;
   metrics?: MetricPayload;
-};
+  metrics_summary?: MetricPayload;
+} & MetricPayload;
 
 type ProductAdsItemsResponse = {
   paging?: {
@@ -124,6 +126,16 @@ const METRICS = [
   "indirect_amount"
 ].join(",");
 
+class MercadoAdsApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly path: string
+  ) {
+    super(message);
+  }
+}
+
 function getEnv() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -150,6 +162,39 @@ function isTokenExpiring(credentials: MarketplaceCredentials) {
 
 function toDateOnly(date: Date) {
   return date.toISOString().slice(0, 10);
+}
+
+function getMetrics(record: { metrics?: MetricPayload; metrics_summary?: MetricPayload } & MetricPayload) {
+  return record.metrics_summary ?? record.metrics ?? record;
+}
+
+function parseMercadoAdsError(status: number, path: string, body: string) {
+  let apiMessage = body.trim();
+
+  try {
+    const parsed = JSON.parse(body) as {
+      error?: string;
+      message?: string;
+      cause?: Array<{ message?: string }>;
+    };
+    apiMessage =
+      parsed.message ??
+      parsed.error ??
+      parsed.cause?.map((cause) => cause.message).filter(Boolean).join("; ") ??
+      apiMessage;
+  } catch {
+    // Keep the plain text body.
+  }
+
+  if ([401, 403].includes(status)) {
+    return `Mercado Ads recusou o acesso (${status}). Verifique se o app tem permissao de publicidade e se a conta tem Product Ads habilitado. ${apiMessage}`;
+  }
+
+  if (status === 404) {
+    return `Endpoint de Mercado Ads nao encontrado para esta conta (${status}). ${apiMessage}`;
+  }
+
+  return `Mercado Ads respondeu ${status} em ${path}. ${apiMessage}`;
 }
 
 async function refreshAccessToken(
@@ -213,16 +258,38 @@ async function mercadoAdsRequest<T>(
   });
 
   if (!response.ok) {
-    if ([403, 404].includes(response.status)) {
-      throw new Error(
-        "Mercado Ads nao esta habilitado para esta conta ou o app nao tem permissao de publicidade."
-      );
-    }
-
-    throw new Error(`Mercado Ads respondeu ${response.status} em ${path}.`);
+    const body = await response.text();
+    throw new MercadoAdsApiError(
+      parseMercadoAdsError(response.status, path, body),
+      response.status,
+      path
+    );
   }
 
   return response.json() as Promise<T>;
+}
+
+async function mercadoAdsRequestWithFallback<T>(
+  paths: string[],
+  accessToken: string,
+  apiVersion: "1" | "2"
+) {
+  let lastError: unknown;
+
+  for (const path of paths) {
+    try {
+      return await mercadoAdsRequest<T>(path, accessToken, apiVersion);
+    } catch (error) {
+      lastError = error;
+      if (!(error instanceof MercadoAdsApiError) || ![404, 405].includes(error.status)) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("Nao foi possivel consultar o Mercado Ads.");
 }
 
 async function getAdvertiser(
@@ -245,6 +312,7 @@ async function getAdvertiser(
 
 async function fetchCampaigns(
   advertiserId: number | string,
+  advertiserSiteId: string,
   accessToken: string,
   dateFrom: string,
   dateTo: string
@@ -263,8 +331,12 @@ async function fetchCampaigns(
       metrics_summary: "true"
     });
 
-    const payload = await mercadoAdsRequest<ProductAdsCampaignsResponse>(
-      `/advertising/advertisers/${advertiserId}/product_ads/campaigns?${params.toString()}`,
+    const payload = await mercadoAdsRequestWithFallback<ProductAdsCampaignsResponse>(
+      [
+        `/advertising/${advertiserSiteId}/advertisers/${advertiserId}/product_ads/campaigns/search?${params.toString()}`,
+        `/marketplace/advertising/${advertiserSiteId}/advertisers/${advertiserId}/product_ads/campaigns/search?${params.toString()}`,
+        `/advertising/advertisers/${advertiserId}/product_ads/campaigns?${params.toString()}`
+      ],
       accessToken,
       "2"
     );
@@ -280,6 +352,7 @@ async function fetchCampaigns(
 
 async function fetchAds(
   advertiserId: number | string,
+  advertiserSiteId: string,
   accessToken: string,
   dateFrom: string,
   dateTo: string
@@ -298,8 +371,12 @@ async function fetchAds(
       metrics_summary: "true"
     });
 
-    const payload = await mercadoAdsRequest<ProductAdsItemsResponse>(
-      `/advertising/advertisers/${advertiserId}/product_ads/items?${params.toString()}`,
+    const payload = await mercadoAdsRequestWithFallback<ProductAdsItemsResponse>(
+      [
+        `/advertising/${advertiserSiteId}/advertisers/${advertiserId}/product_ads/ads/search?${params.toString()}`,
+        `/marketplace/advertising/${advertiserSiteId}/advertisers/${advertiserId}/product_ads/ads/search?${params.toString()}`,
+        `/advertising/advertisers/${advertiserId}/product_ads/items?${params.toString()}`
+      ],
       accessToken,
       "2"
     );
@@ -442,13 +519,21 @@ export async function POST(request: Request) {
       }
 
       const advertiserId = advertiser.advertiser_id;
+      const advertiserSiteId = advertiser.site_id ?? currentAccount.site_id ?? "MLB";
       const campaigns = await fetchCampaigns(
         advertiserId,
+        advertiserSiteId,
         accessToken,
         dateFrom,
         dateTo
       );
-      const ads = await fetchAds(advertiserId, accessToken, dateFrom, dateTo);
+      const ads = await fetchAds(
+        advertiserId,
+        advertiserSiteId,
+        accessToken,
+        dateFrom,
+        dateTo
+      );
       const campaignIds = new Set([
         ...campaigns.map((campaign) => String(campaign.id)),
         ...ads
@@ -477,6 +562,7 @@ export async function POST(request: Request) {
                 daily_goal_amount: campaign?.acos_target ?? null,
                 raw_payload: {
                   advertiser,
+                  advertiser_site_id: advertiserSiteId,
                   campaign
                 }
               };
@@ -582,7 +668,7 @@ export async function POST(request: Request) {
           const productId = listing?.product_id ?? productsBySku.get(fallbackSku);
           if (!productId) return null;
 
-          const metrics = ad.metrics ?? {};
+          const metrics = getMetrics(ad);
           const attributedRevenue =
             toNumber(metrics.total_amount) ||
             toNumber(metrics.direct_amount) + toNumber(metrics.indirect_amount);
@@ -604,6 +690,7 @@ export async function POST(request: Request) {
             acos: metrics.acos ?? null,
             raw_payload: {
               advertiser,
+              advertiser_site_id: advertiserSiteId,
               date_from: dateFrom,
               date_to: dateTo,
               ad
@@ -637,6 +724,7 @@ export async function POST(request: Request) {
           records_processed: metricRows.length,
           metadata: {
             advertiser_id: advertiserId,
+            advertiser_site_id: advertiserSiteId,
             days_back: daysBack,
             campaigns: campaignIds.size,
             ads: ads.length,
@@ -651,6 +739,7 @@ export async function POST(request: Request) {
       return NextResponse.json({
         accountName: currentAccount.account_name,
         advertiserId,
+        advertiserSiteId,
         daysBack,
         campaigns: campaignIds.size,
         ads: ads.length,
