@@ -75,6 +75,16 @@ type SyncOrdersSummary = {
   syncedAt: string;
 };
 
+type SyncInventorySummary = {
+  accountName: string;
+  listingsChecked: number;
+  skuSources: number;
+  snapshots: number;
+  fullSnapshots: number;
+  availableQuantity: number;
+  syncedAt: string;
+};
+
 type CostCenterRow = {
   id: string;
   cost_name: string;
@@ -94,6 +104,25 @@ type OrderItemRow = {
   marketplace_fee_amount: number | string;
   shipping_cost_amount: number | string;
   discount_amount: number | string;
+};
+
+type InventorySnapshotRow = {
+  seller_sku: string | null;
+  fulfillment_channel: string;
+  available_quantity: number | string;
+  reserved_quantity: number | string;
+  not_available_quantity: number | string;
+  captured_at: string;
+};
+
+type InventoryDisplayRow = {
+  sku: string;
+  channel: string;
+  available: number;
+  reserved: number;
+  notAvailable: number;
+  status: "Saudavel" | "Atencao" | "Critico";
+  capturedAt?: string;
 };
 
 const salesSeed: SaleRecord[] = [
@@ -222,13 +251,13 @@ const adSpendSeed: AdvertisingSpend[] = [
   }
 ];
 
-const inventoryRows = [
+const inventoryRows: InventoryDisplayRow[] = [
   {
     sku: "MLB-CABO-USB-C-1M",
     channel: "Full",
     available: 420,
     reserved: 36,
-    transfer: 280,
+    notAvailable: 280,
     status: "Saudavel"
   },
   {
@@ -236,7 +265,7 @@ const inventoryRows = [
     channel: "Full",
     available: 96,
     reserved: 12,
-    transfer: 40,
+    notAvailable: 40,
     status: "Atencao"
   },
   {
@@ -244,7 +273,7 @@ const inventoryRows = [
     channel: "Full",
     available: 31,
     reserved: 8,
-    transfer: 20,
+    notAvailable: 20,
     status: "Critico"
   },
   {
@@ -252,7 +281,7 @@ const inventoryRows = [
     channel: "Flex",
     available: 188,
     reserved: 19,
-    transfer: 0,
+    notAvailable: 0,
     status: "Saudavel"
   }
 ];
@@ -413,6 +442,27 @@ function numberFromDb(value: number | string | null | undefined) {
   return Number.isFinite(numeric) ? numeric : 0;
 }
 
+function channelLabel(channel: string) {
+  const labels: Record<string, string> = {
+    full: "Full",
+    fulfillment: "Full",
+    selling_address: "Estoque local",
+    seller_warehouse: "Deposito proprio",
+    flex: "Flex",
+    cross_docking: "Coleta",
+    drop_off: "Agencia",
+    marketplace: "Marketplace"
+  };
+
+  return labels[channel] ?? channel;
+}
+
+function inventoryStatus(available: number): InventoryDisplayRow["status"] {
+  if (available <= 5) return "Critico";
+  if (available <= 20) return "Atencao";
+  return "Saudavel";
+}
+
 export function DashmarketDashboard() {
   const [supabaseClient] = useState(() => {
     try {
@@ -432,6 +482,7 @@ export function DashmarketDashboard() {
     useState<SupabaseStatus>("checking");
   const [realProducts, setRealProducts] = useState<ProductRow[]>([]);
   const [realSales, setRealSales] = useState<SaleRecord[]>([]);
+  const [realInventory, setRealInventory] = useState<InventoryDisplayRow[]>([]);
   const [marketplaceAccounts, setMarketplaceAccounts] = useState<
     MarketplaceAccountRow[]
   >([]);
@@ -440,11 +491,14 @@ export function DashmarketDashboard() {
   const [isConnectingMarketplace, setIsConnectingMarketplace] = useState(false);
   const [isSyncingListings, setIsSyncingListings] = useState(false);
   const [isSyncingOrders, setIsSyncingOrders] = useState(false);
+  const [isSyncingInventory, setIsSyncingInventory] = useState(false);
   const [syncSummary, setSyncSummary] = useState<SyncListingsSummary | null>(
     null
   );
   const [ordersSyncSummary, setOrdersSyncSummary] =
     useState<SyncOrdersSummary | null>(null);
+  const [inventorySyncSummary, setInventorySyncSummary] =
+    useState<SyncInventorySummary | null>(null);
   const [costForm, setCostForm] = useState({
     sku: salesSeed[0].sku,
     label: "",
@@ -455,6 +509,8 @@ export function DashmarketDashboard() {
   });
 
   const activeSales = realSales.length > 0 ? realSales : salesSeed;
+  const displayInventoryRows =
+    realInventory.length > 0 ? realInventory : inventoryRows;
   const productOptions = useMemo(
     () =>
       realProducts.length > 0
@@ -596,6 +652,45 @@ export function DashmarketDashboard() {
     setRealSales(Array.from(salesBySku.values()));
   }, [supabaseClient]);
 
+  const loadInventory = useCallback(async (organizationId: string) => {
+    if (!supabaseClient) return;
+
+    const { data, error } = await supabaseClient
+      .from("inventory_snapshots")
+      .select(
+        "seller_sku, fulfillment_channel, available_quantity, reserved_quantity, not_available_quantity, captured_at"
+      )
+      .eq("organization_id", organizationId)
+      .order("captured_at", { ascending: false })
+      .limit(2000);
+
+    if (error) throw error;
+
+    const latestBySkuAndChannel = new Map<string, InventoryDisplayRow>();
+
+    for (const row of (data ?? []) as InventorySnapshotRow[]) {
+      const sku = row.seller_sku ?? "SKU sem codigo";
+      const channel = row.fulfillment_channel;
+      const key = `${sku}:${channel}`;
+
+      if (latestBySkuAndChannel.has(key)) continue;
+
+      const available = numberFromDb(row.available_quantity);
+
+      latestBySkuAndChannel.set(key, {
+        sku,
+        channel: channelLabel(channel),
+        available,
+        reserved: numberFromDb(row.reserved_quantity),
+        notAvailable: numberFromDb(row.not_available_quantity),
+        status: inventoryStatus(available),
+        capturedAt: row.captured_at
+      });
+    }
+
+    setRealInventory(Array.from(latestBySkuAndChannel.values()));
+  }, [supabaseClient]);
+
   const loadMarketplaceAccounts = useCallback(async (organizationId: string) => {
     if (!supabaseClient) return;
 
@@ -619,6 +714,7 @@ export function DashmarketDashboard() {
       if (!supabaseClient) {
         setSupabaseStatus("demo");
         setRealSales([]);
+        setRealInventory([]);
         setCosts(costsSeed);
         return;
       }
@@ -637,6 +733,7 @@ export function DashmarketDashboard() {
           setOrganization(null);
           setRealProducts([]);
           setRealSales([]);
+          setRealInventory([]);
           setCosts(costsSeed);
           return;
         }
@@ -662,10 +759,12 @@ export function DashmarketDashboard() {
         if (currentOrganization) {
           await loadCostCenter(currentOrganization.id);
           await loadSales(currentOrganization.id);
+          await loadInventory(currentOrganization.id);
           await loadMarketplaceAccounts(currentOrganization.id);
         } else {
           setCosts([]);
           setRealSales([]);
+          setRealInventory([]);
           setMarketplaceAccounts([]);
           setDataMessage("Usuario autenticado, mas sem empresa vinculada.");
         }
@@ -673,6 +772,7 @@ export function DashmarketDashboard() {
         if (!isMounted) return;
         setSupabaseStatus("error");
         setRealSales([]);
+        setRealInventory([]);
         setCosts(costsSeed);
         setDataMessage(
           error instanceof Error
@@ -687,7 +787,13 @@ export function DashmarketDashboard() {
     return () => {
       isMounted = false;
     };
-  }, [loadCostCenter, loadMarketplaceAccounts, loadSales, supabaseClient]);
+  }, [
+    loadCostCenter,
+    loadInventory,
+    loadMarketplaceAccounts,
+    loadSales,
+    supabaseClient
+  ]);
 
   async function addCost(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -775,9 +881,11 @@ export function DashmarketDashboard() {
     setOrganization(null);
     setRealProducts([]);
     setRealSales([]);
+    setRealInventory([]);
     setMarketplaceAccounts([]);
     setSyncSummary(null);
     setOrdersSyncSummary(null);
+    setInventorySyncSummary(null);
     setCosts(costsSeed);
     setDataMessage("Sessao encerrada.");
   }
@@ -926,6 +1034,64 @@ export function DashmarketDashboard() {
     }
   }
 
+  async function syncMercadoLivreInventory() {
+    if (!supabaseClient || !organization) {
+      setDataMessage("Entre no DASHMARKET antes de sincronizar estoque.");
+      return;
+    }
+
+    setIsSyncingInventory(true);
+    setDataMessage(null);
+
+    try {
+      const { data: sessionData, error: sessionError } =
+        await supabaseClient.auth.getSession();
+
+      if (sessionError) throw sessionError;
+
+      const accessToken = sessionData.session?.access_token;
+      if (!accessToken) throw new Error("Sessao expirada. Entre novamente.");
+
+      const response = await fetch("/api/marketplaces/mercadolivre/sync-inventory", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({ organizationId: organization.id })
+      });
+
+      const payload = (await response.json()) as
+        | SyncInventorySummary
+        | { error?: string };
+
+      if (!response.ok) {
+        throw new Error(
+          "error" in payload && payload.error
+            ? payload.error
+            : "Nao foi possivel sincronizar estoque."
+        );
+      }
+
+      const summary = payload as SyncInventorySummary;
+      setInventorySyncSummary(summary);
+      setDataMessage(
+        `Estoque sincronizado: ${summary.snapshots} snapshots, ${summary.fullSnapshots} do Full.`
+      );
+      await loadCostCenter(organization.id);
+      await loadInventory(organization.id);
+      await loadMarketplaceAccounts(organization.id);
+    } catch (error) {
+      setDataMessage(
+        error instanceof Error
+          ? error.message
+          : "Nao foi possivel sincronizar estoque."
+      );
+    } finally {
+      setIsSyncingInventory(false);
+    }
+  }
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const status = params.get("ml_status");
@@ -1050,7 +1216,8 @@ export function DashmarketDashboard() {
                 supabaseStatus !== "connected" ||
                 isConnectingMarketplace ||
                 isSyncingListings ||
-                isSyncingOrders
+                isSyncingOrders ||
+                isSyncingInventory
               }
               onClick={
                 mercadoLivreAccount ? syncMercadoLivreListings : connectMercadoLivre
@@ -1073,13 +1240,31 @@ export function DashmarketDashboard() {
                   selectedProvider !== "mercadolivre" ||
                   supabaseStatus !== "connected" ||
                   isSyncingListings ||
-                  isSyncingOrders
+                  isSyncingOrders ||
+                  isSyncingInventory
                 }
                 onClick={syncMercadoLivreOrders}
                 type="button"
               >
                 <ClipboardList aria-hidden className="h-4 w-4" />
                 {isSyncingOrders ? "Sincronizando" : "Sincronizar Vendas"}
+              </button>
+            )}
+            {mercadoLivreAccount && (
+              <button
+                className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-white/10 px-3 text-sm font-bold text-white ring-1 ring-white/20 hover:bg-white/20"
+                disabled={
+                  selectedProvider !== "mercadolivre" ||
+                  supabaseStatus !== "connected" ||
+                  isSyncingListings ||
+                  isSyncingOrders ||
+                  isSyncingInventory
+                }
+                onClick={syncMercadoLivreInventory}
+                type="button"
+              >
+                <Boxes aria-hidden className="h-4 w-4" />
+                {isSyncingInventory ? "Sincronizando" : "Sincronizar Estoque"}
               </button>
             )}
           </section>
@@ -1127,7 +1312,8 @@ export function DashmarketDashboard() {
                   supabaseStatus !== "connected" ||
                   isConnectingMarketplace ||
                   isSyncingListings ||
-                  isSyncingOrders
+                  isSyncingOrders ||
+                  isSyncingInventory
                 }
                 type="button"
               >
@@ -1146,7 +1332,8 @@ export function DashmarketDashboard() {
                   disabled={
                     supabaseStatus !== "connected" ||
                     isSyncingListings ||
-                    isSyncingOrders
+                    isSyncingOrders ||
+                    isSyncingInventory
                   }
                   onClick={syncMercadoLivreOrders}
                   type="button"
@@ -1264,6 +1451,38 @@ export function DashmarketDashboard() {
                   ].map(([label, value]) => (
                     <div
                       className="rounded-lg bg-emerald-50 px-3 py-2 ring-1 ring-emerald-100"
+                      key={label}
+                    >
+                      <p className="text-xs font-bold uppercase tracking-normal text-black/45">
+                        {label}
+                      </p>
+                      <p className="mt-1 font-semibold text-ink">{value}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {inventorySyncSummary && (
+                <div className="mt-3 grid gap-2 sm:grid-cols-4">
+                  {[
+                    [
+                      "SKUs lidos",
+                      formatNumber.format(inventorySyncSummary.skuSources)
+                    ],
+                    [
+                      "Snapshots",
+                      formatNumber.format(inventorySyncSummary.snapshots)
+                    ],
+                    [
+                      "Full",
+                      formatNumber.format(inventorySyncSummary.fullSnapshots)
+                    ],
+                    [
+                      "Disponivel",
+                      formatNumber.format(inventorySyncSummary.availableQuantity)
+                    ]
+                  ].map(([label, value]) => (
+                    <div
+                      className="rounded-lg bg-teal-50 px-3 py-2 ring-1 ring-teal-100"
                       key={label}
                     >
                       <p className="text-xs font-bold uppercase tracking-normal text-black/45">
@@ -1528,11 +1747,31 @@ export function DashmarketDashboard() {
           {activeView === "estoque" && (
             <section className="mt-5 grid gap-5 xl:grid-cols-[1fr_360px]">
               <section className="rounded-lg border border-black/10 bg-white shadow-sm">
-                <div className="border-b border-black/10 p-4">
-                  <h2 className="text-lg font-bold">Estoque por canal de envio</h2>
-                  <p className="text-sm text-black/60">
-                    Pronto para receber snapshots do Full e demais modalidades.
-                  </p>
+                <div className="flex flex-col gap-3 border-b border-black/10 p-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h2 className="text-lg font-bold">Estoque por canal de envio</h2>
+                    <p className="text-sm text-black/60">
+                      {realInventory.length > 0
+                        ? "Ultimo snapshot salvo no Supabase por SKU e canal."
+                        : "Pronto para receber snapshots do Full e demais modalidades."}
+                    </p>
+                  </div>
+                  {mercadoLivreAccount && (
+                    <button
+                      className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-ink px-4 text-sm font-bold text-white hover:bg-black"
+                      disabled={
+                        supabaseStatus !== "connected" ||
+                        isSyncingListings ||
+                        isSyncingOrders ||
+                        isSyncingInventory
+                      }
+                      onClick={syncMercadoLivreInventory}
+                      type="button"
+                    >
+                      <Boxes aria-hidden className="h-4 w-4" />
+                      {isSyncingInventory ? "Sincronizando" : "Sincronizar Estoque"}
+                    </button>
+                  )}
                 </div>
                 <div className="table-scroll overflow-x-auto">
                   <table className="min-w-[780px] w-full text-left text-sm">
@@ -1542,24 +1781,32 @@ export function DashmarketDashboard() {
                         <th className="px-4 py-3">Canal</th>
                         <th className="px-4 py-3">Disponivel</th>
                         <th className="px-4 py-3">Reservado</th>
-                        <th className="px-4 py-3">Em transferencia</th>
+                        <th className="px-4 py-3">Indisponivel</th>
                         <th className="px-4 py-3">Status</th>
+                        <th className="px-4 py-3">Atualizado</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-black/10">
-                      {inventoryRows.map((row) => (
-                        <tr key={row.sku}>
+                      {displayInventoryRows.map((row) => (
+                        <tr key={`${row.sku}:${row.channel}`}>
                           <td className="px-4 py-3 font-bold">{row.sku}</td>
                           <td className="px-4 py-3">{row.channel}</td>
                           <td className="px-4 py-3">{formatNumber.format(row.available)}</td>
                           <td className="px-4 py-3">{formatNumber.format(row.reserved)}</td>
-                          <td className="px-4 py-3">{formatNumber.format(row.transfer)}</td>
+                          <td className="px-4 py-3">
+                            {formatNumber.format(row.notAvailable)}
+                          </td>
                           <td className="px-4 py-3">
                             <span
                               className={`inline-flex rounded-lg px-2 py-1 text-xs font-bold ring-1 ${statusClass(row.status)}`}
                             >
                               {row.status}
                             </span>
+                          </td>
+                          <td className="px-4 py-3 text-black/50">
+                            {row.capturedAt
+                              ? new Date(row.capturedAt).toLocaleString("pt-BR")
+                              : "Demo"}
                           </td>
                         </tr>
                       ))}

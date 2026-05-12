@@ -41,6 +41,9 @@ type MercadoLivreAttribute = {
 type MercadoLivreVariation = {
   id?: number;
   seller_custom_field?: string | null;
+  inventory_id?: string | null;
+  user_product_id?: string | null;
+  available_quantity?: number | null;
   attribute_combinations?: MercadoLivreAttribute[];
   attributes?: MercadoLivreAttribute[];
 };
@@ -49,6 +52,9 @@ type MercadoLivreItem = {
   id: string;
   title: string;
   seller_custom_field?: string | null;
+  inventory_id?: string | null;
+  user_product_id?: string | null;
+  available_quantity?: number | null;
   attributes?: MercadoLivreAttribute[];
   variations?: MercadoLivreVariation[];
   permalink?: string | null;
@@ -254,7 +260,7 @@ async function fetchItems(ids: string[], accessToken: string) {
     const params = new URLSearchParams({
       ids: group.join(","),
       attributes:
-        "id,title,seller_custom_field,attributes,variations,permalink,listing_type_id,shipping,status"
+        "id,title,seller_custom_field,inventory_id,user_product_id,available_quantity,attributes,variations,permalink,listing_type_id,shipping,status"
     });
 
     const payload = await mercadoLivreRequest<MercadoLivreMultiGetItem[]>(
