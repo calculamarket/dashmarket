@@ -85,6 +85,27 @@ type SyncInventorySummary = {
   syncedAt: string;
 };
 
+type SyncAdvertisingSummary = {
+  accountName: string;
+  advertiserId: string | number;
+  daysBack: number;
+  campaigns: number;
+  ads: number;
+  metrics: number;
+  adSpend: number;
+  attributedRevenue: number;
+  syncedAt: string;
+};
+
+type SyncPromotionsSummary = {
+  accountName: string;
+  promotions: number;
+  inserted: number;
+  updated: number;
+  activePromotions: number;
+  syncedAt: string;
+};
+
 type CostCenterRow = {
   id: string;
   cost_name: string;
@@ -123,6 +144,37 @@ type InventoryDisplayRow = {
   notAvailable: number;
   status: "Saudavel" | "Atencao" | "Critico";
   capturedAt?: string;
+};
+
+type AdvertisingMetricRow = {
+  impressions: number | string;
+  clicks: number | string;
+  ad_spend_amount: number | string;
+  attributed_revenue_amount: number | string;
+  attributed_orders: number | string;
+  products: ProductRow | ProductRow[] | null;
+};
+
+type PromotionDbRow = {
+  provider_promotion_id: string;
+  name: string;
+  promotion_type: string | null;
+  status: string | null;
+  starts_at: string | null;
+  ends_at: string | null;
+  discount_amount: number | string | null;
+  discount_percent: number | string | null;
+  products: ProductRow | ProductRow[] | null;
+};
+
+type PromotionDisplayRow = {
+  sku: string;
+  name: string;
+  discount: string;
+  period: string;
+  impact: string;
+  type?: string;
+  status?: string | null;
 };
 
 const salesSeed: SaleRecord[] = [
@@ -286,7 +338,7 @@ const inventoryRows: InventoryDisplayRow[] = [
   }
 ];
 
-const promotionRows = [
+const promotionRows: PromotionDisplayRow[] = [
   {
     sku: "MLB-CABO-USB-C-1M",
     name: "Oferta relampago",
@@ -463,6 +515,24 @@ function inventoryStatus(available: number): InventoryDisplayRow["status"] {
   return "Saudavel";
 }
 
+function formatPromotionPeriod(startsAt: string | null, endsAt: string | null) {
+  const start = startsAt ? new Date(startsAt).toLocaleDateString("pt-BR") : null;
+  const end = endsAt ? new Date(endsAt).toLocaleDateString("pt-BR") : null;
+
+  if (start && end) return `${start} a ${end}`;
+  if (start) return `Desde ${start}`;
+  if (end) return `Ate ${end}`;
+  return "Periodo nao informado";
+}
+
+function promotionImpact(status: string | null) {
+  const normalized = status?.toLowerCase();
+  if (normalized === "started" || normalized === "active") return "Ativa";
+  if (normalized === "pending" || normalized === "candidate") return "Pendente";
+  if (normalized === "finished" || normalized === "closed") return "Encerrada";
+  return status ?? "Status aberto";
+}
+
 export function DashmarketDashboard() {
   const [supabaseClient] = useState(() => {
     try {
@@ -483,6 +553,9 @@ export function DashmarketDashboard() {
   const [realProducts, setRealProducts] = useState<ProductRow[]>([]);
   const [realSales, setRealSales] = useState<SaleRecord[]>([]);
   const [realInventory, setRealInventory] = useState<InventoryDisplayRow[]>([]);
+  const [realAdvertising, setRealAdvertising] =
+    useState<AdvertisingSpend[]>([]);
+  const [realPromotions, setRealPromotions] = useState<PromotionDisplayRow[]>([]);
   const [marketplaceAccounts, setMarketplaceAccounts] = useState<
     MarketplaceAccountRow[]
   >([]);
@@ -492,6 +565,8 @@ export function DashmarketDashboard() {
   const [isSyncingListings, setIsSyncingListings] = useState(false);
   const [isSyncingOrders, setIsSyncingOrders] = useState(false);
   const [isSyncingInventory, setIsSyncingInventory] = useState(false);
+  const [isSyncingAdvertising, setIsSyncingAdvertising] = useState(false);
+  const [isSyncingPromotions, setIsSyncingPromotions] = useState(false);
   const [syncSummary, setSyncSummary] = useState<SyncListingsSummary | null>(
     null
   );
@@ -499,6 +574,10 @@ export function DashmarketDashboard() {
     useState<SyncOrdersSummary | null>(null);
   const [inventorySyncSummary, setInventorySyncSummary] =
     useState<SyncInventorySummary | null>(null);
+  const [advertisingSyncSummary, setAdvertisingSyncSummary] =
+    useState<SyncAdvertisingSummary | null>(null);
+  const [promotionsSyncSummary, setPromotionsSyncSummary] =
+    useState<SyncPromotionsSummary | null>(null);
   const [costForm, setCostForm] = useState({
     sku: salesSeed[0].sku,
     label: "",
@@ -509,8 +588,12 @@ export function DashmarketDashboard() {
   });
 
   const activeSales = realSales.length > 0 ? realSales : salesSeed;
+  const activeAdvertising =
+    realAdvertising.length > 0 ? realAdvertising : adSpendSeed;
   const displayInventoryRows =
     realInventory.length > 0 ? realInventory : inventoryRows;
+  const displayPromotionRows =
+    realPromotions.length > 0 ? realPromotions : promotionRows;
   const productOptions = useMemo(
     () =>
       realProducts.length > 0
@@ -536,9 +619,15 @@ export function DashmarketDashboard() {
   const mercadoLivreAccount = marketplaceAccounts.find(
     (account) => account.provider === "mercadolivre" && account.status === "connected"
   );
+  const isSyncingMarketplace =
+    isSyncingListings ||
+    isSyncingOrders ||
+    isSyncingInventory ||
+    isSyncingAdvertising ||
+    isSyncingPromotions;
   const marginRows = useMemo(
-    () => calculateContributionMargins(activeSales, costs, adSpendSeed),
-    [activeSales, costs]
+    () => calculateContributionMargins(activeSales, costs, activeAdvertising),
+    [activeAdvertising, activeSales, costs]
   );
 
   const filteredMargins = marginRows.filter((row) => {
@@ -691,6 +780,88 @@ export function DashmarketDashboard() {
     setRealInventory(Array.from(latestBySkuAndChannel.values()));
   }, [supabaseClient]);
 
+  const loadAdvertising = useCallback(async (organizationId: string) => {
+    if (!supabaseClient) return;
+
+    const { data, error } = await supabaseClient
+      .from("advertising_metrics")
+      .select(
+        "impressions, clicks, ad_spend_amount, attributed_revenue_amount, attributed_orders, products(id, internal_sku, title)"
+      )
+      .eq("organization_id", organizationId)
+      .limit(2000);
+
+    if (error) throw error;
+
+    const adsBySku = new Map<string, AdvertisingSpend>();
+
+    for (const row of (data ?? []) as AdvertisingMetricRow[]) {
+      const product = getRelatedProduct({
+        products: row.products
+      } as CostCenterRow);
+      const sku = product?.internal_sku ?? "SKU sem codigo";
+      const current =
+        adsBySku.get(sku) ??
+        ({
+          sku,
+          amount: 0,
+          clicks: 0,
+          impressions: 0,
+          attributedRevenue: 0
+        } satisfies AdvertisingSpend);
+
+      current.amount += numberFromDb(row.ad_spend_amount);
+      current.clicks += numberFromDb(row.clicks);
+      current.impressions += numberFromDb(row.impressions);
+      current.attributedRevenue += numberFromDb(row.attributed_revenue_amount);
+      adsBySku.set(sku, current);
+    }
+
+    setRealAdvertising(Array.from(adsBySku.values()));
+  }, [supabaseClient]);
+
+  const loadPromotions = useCallback(async (organizationId: string) => {
+    if (!supabaseClient) return;
+
+    const { data, error } = await supabaseClient
+      .from("promotions")
+      .select(
+        "provider_promotion_id, name, promotion_type, status, starts_at, ends_at, discount_amount, discount_percent, products(id, internal_sku, title)"
+      )
+      .eq("organization_id", organizationId)
+      .order("starts_at", { ascending: false, nullsFirst: false })
+      .limit(100);
+
+    if (error) throw error;
+
+    setRealPromotions(
+      ((data ?? []) as PromotionDbRow[]).map((row) => {
+        const product = getRelatedProduct({
+          products: row.products
+        } as CostCenterRow);
+        const discountPercent = numberFromDb(row.discount_percent);
+        const discountAmount = numberFromDb(row.discount_amount);
+
+        return {
+          sku: product?.internal_sku ?? "Geral",
+          name: row.name,
+          discount:
+            discountPercent > 0
+              ? `${discountPercent.toLocaleString("pt-BR", {
+                  maximumFractionDigits: 1
+                })}%`
+              : discountAmount > 0
+                ? formatCurrency.format(discountAmount)
+                : row.promotion_type ?? "Oferta",
+          period: formatPromotionPeriod(row.starts_at, row.ends_at),
+          impact: promotionImpact(row.status),
+          type: row.promotion_type ?? undefined,
+          status: row.status
+        };
+      })
+    );
+  }, [supabaseClient]);
+
   const loadMarketplaceAccounts = useCallback(async (organizationId: string) => {
     if (!supabaseClient) return;
 
@@ -715,6 +886,8 @@ export function DashmarketDashboard() {
         setSupabaseStatus("demo");
         setRealSales([]);
         setRealInventory([]);
+        setRealAdvertising([]);
+        setRealPromotions([]);
         setCosts(costsSeed);
         return;
       }
@@ -734,6 +907,8 @@ export function DashmarketDashboard() {
           setRealProducts([]);
           setRealSales([]);
           setRealInventory([]);
+          setRealAdvertising([]);
+          setRealPromotions([]);
           setCosts(costsSeed);
           return;
         }
@@ -760,11 +935,15 @@ export function DashmarketDashboard() {
           await loadCostCenter(currentOrganization.id);
           await loadSales(currentOrganization.id);
           await loadInventory(currentOrganization.id);
+          await loadAdvertising(currentOrganization.id);
+          await loadPromotions(currentOrganization.id);
           await loadMarketplaceAccounts(currentOrganization.id);
         } else {
           setCosts([]);
           setRealSales([]);
           setRealInventory([]);
+          setRealAdvertising([]);
+          setRealPromotions([]);
           setMarketplaceAccounts([]);
           setDataMessage("Usuario autenticado, mas sem empresa vinculada.");
         }
@@ -773,6 +952,8 @@ export function DashmarketDashboard() {
         setSupabaseStatus("error");
         setRealSales([]);
         setRealInventory([]);
+        setRealAdvertising([]);
+        setRealPromotions([]);
         setCosts(costsSeed);
         setDataMessage(
           error instanceof Error
@@ -789,8 +970,10 @@ export function DashmarketDashboard() {
     };
   }, [
     loadCostCenter,
+    loadAdvertising,
     loadInventory,
     loadMarketplaceAccounts,
+    loadPromotions,
     loadSales,
     supabaseClient
   ]);
@@ -882,10 +1065,14 @@ export function DashmarketDashboard() {
     setRealProducts([]);
     setRealSales([]);
     setRealInventory([]);
+    setRealAdvertising([]);
+    setRealPromotions([]);
     setMarketplaceAccounts([]);
     setSyncSummary(null);
     setOrdersSyncSummary(null);
     setInventorySyncSummary(null);
+    setAdvertisingSyncSummary(null);
+    setPromotionsSyncSummary(null);
     setCosts(costsSeed);
     setDataMessage("Sessao encerrada.");
   }
@@ -1092,6 +1279,120 @@ export function DashmarketDashboard() {
     }
   }
 
+  async function syncMercadoLivreAdvertising() {
+    if (!supabaseClient || !organization) {
+      setDataMessage("Entre no DASHMARKET antes de sincronizar publicidade.");
+      return;
+    }
+
+    setIsSyncingAdvertising(true);
+    setDataMessage(null);
+
+    try {
+      const { data: sessionData, error: sessionError } =
+        await supabaseClient.auth.getSession();
+
+      if (sessionError) throw sessionError;
+
+      const accessToken = sessionData.session?.access_token;
+      if (!accessToken) throw new Error("Sessao expirada. Entre novamente.");
+
+      const response = await fetch("/api/marketplaces/mercadolivre/sync-advertising", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({ organizationId: organization.id, daysBack: 30 })
+      });
+
+      const payload = (await response.json()) as
+        | SyncAdvertisingSummary
+        | { error?: string };
+
+      if (!response.ok) {
+        throw new Error(
+          "error" in payload && payload.error
+            ? payload.error
+            : "Nao foi possivel sincronizar publicidade."
+        );
+      }
+
+      const summary = payload as SyncAdvertisingSummary;
+      setAdvertisingSyncSummary(summary);
+      setDataMessage(
+        `Publicidade sincronizada: ${summary.metrics} metricas e ${summary.campaigns} campanhas.`
+      );
+      await loadAdvertising(organization.id);
+      await loadMarketplaceAccounts(organization.id);
+    } catch (error) {
+      setDataMessage(
+        error instanceof Error
+          ? error.message
+          : "Nao foi possivel sincronizar publicidade."
+      );
+    } finally {
+      setIsSyncingAdvertising(false);
+    }
+  }
+
+  async function syncMercadoLivrePromotions() {
+    if (!supabaseClient || !organization) {
+      setDataMessage("Entre no DASHMARKET antes de sincronizar promocoes.");
+      return;
+    }
+
+    setIsSyncingPromotions(true);
+    setDataMessage(null);
+
+    try {
+      const { data: sessionData, error: sessionError } =
+        await supabaseClient.auth.getSession();
+
+      if (sessionError) throw sessionError;
+
+      const accessToken = sessionData.session?.access_token;
+      if (!accessToken) throw new Error("Sessao expirada. Entre novamente.");
+
+      const response = await fetch("/api/marketplaces/mercadolivre/sync-promotions", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({ organizationId: organization.id })
+      });
+
+      const payload = (await response.json()) as
+        | SyncPromotionsSummary
+        | { error?: string };
+
+      if (!response.ok) {
+        throw new Error(
+          "error" in payload && payload.error
+            ? payload.error
+            : "Nao foi possivel sincronizar promocoes."
+        );
+      }
+
+      const summary = payload as SyncPromotionsSummary;
+      setPromotionsSyncSummary(summary);
+      setDataMessage(
+        `Promocoes sincronizadas: ${summary.promotions} campanhas, ${summary.activePromotions} ativas.`
+      );
+      await loadPromotions(organization.id);
+      await loadMarketplaceAccounts(organization.id);
+    } catch (error) {
+      setDataMessage(
+        error instanceof Error
+          ? error.message
+          : "Nao foi possivel sincronizar promocoes."
+      );
+    } finally {
+      setIsSyncingPromotions(false);
+    }
+  }
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const status = params.get("ml_status");
@@ -1215,9 +1516,7 @@ export function DashmarketDashboard() {
                 selectedProvider !== "mercadolivre" ||
                 supabaseStatus !== "connected" ||
                 isConnectingMarketplace ||
-                isSyncingListings ||
-                isSyncingOrders ||
-                isSyncingInventory
+                isSyncingMarketplace
               }
               onClick={
                 mercadoLivreAccount ? syncMercadoLivreListings : connectMercadoLivre
@@ -1239,9 +1538,7 @@ export function DashmarketDashboard() {
                 disabled={
                   selectedProvider !== "mercadolivre" ||
                   supabaseStatus !== "connected" ||
-                  isSyncingListings ||
-                  isSyncingOrders ||
-                  isSyncingInventory
+                  isSyncingMarketplace
                 }
                 onClick={syncMercadoLivreOrders}
                 type="button"
@@ -1256,15 +1553,43 @@ export function DashmarketDashboard() {
                 disabled={
                   selectedProvider !== "mercadolivre" ||
                   supabaseStatus !== "connected" ||
-                  isSyncingListings ||
-                  isSyncingOrders ||
-                  isSyncingInventory
+                  isSyncingMarketplace
                 }
                 onClick={syncMercadoLivreInventory}
                 type="button"
               >
                 <Boxes aria-hidden className="h-4 w-4" />
                 {isSyncingInventory ? "Sincronizando" : "Sincronizar Estoque"}
+              </button>
+            )}
+            {mercadoLivreAccount && (
+              <button
+                className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-white/10 px-3 text-sm font-bold text-white ring-1 ring-white/20 hover:bg-white/20"
+                disabled={
+                  selectedProvider !== "mercadolivre" ||
+                  supabaseStatus !== "connected" ||
+                  isSyncingMarketplace
+                }
+                onClick={syncMercadoLivreAdvertising}
+                type="button"
+              >
+                <Megaphone aria-hidden className="h-4 w-4" />
+                {isSyncingAdvertising ? "Sincronizando" : "Sincronizar Ads"}
+              </button>
+            )}
+            {mercadoLivreAccount && (
+              <button
+                className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-white/10 px-3 text-sm font-bold text-white ring-1 ring-white/20 hover:bg-white/20"
+                disabled={
+                  selectedProvider !== "mercadolivre" ||
+                  supabaseStatus !== "connected" ||
+                  isSyncingMarketplace
+                }
+                onClick={syncMercadoLivrePromotions}
+                type="button"
+              >
+                <Tags aria-hidden className="h-4 w-4" />
+                {isSyncingPromotions ? "Sincronizando" : "Sincronizar Promoções"}
               </button>
             )}
           </section>
@@ -1311,9 +1636,7 @@ export function DashmarketDashboard() {
                   selectedProvider !== "mercadolivre" ||
                   supabaseStatus !== "connected" ||
                   isConnectingMarketplace ||
-                  isSyncingListings ||
-                  isSyncingOrders ||
-                  isSyncingInventory
+                  isSyncingMarketplace
                 }
                 type="button"
               >
@@ -1331,9 +1654,7 @@ export function DashmarketDashboard() {
                   className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-ink px-4 text-sm font-bold text-white shadow-sm hover:bg-black"
                   disabled={
                     supabaseStatus !== "connected" ||
-                    isSyncingListings ||
-                    isSyncingOrders ||
-                    isSyncingInventory
+                    isSyncingMarketplace
                   }
                   onClick={syncMercadoLivreOrders}
                   type="button"
@@ -1483,6 +1804,67 @@ export function DashmarketDashboard() {
                   ].map(([label, value]) => (
                     <div
                       className="rounded-lg bg-teal-50 px-3 py-2 ring-1 ring-teal-100"
+                      key={label}
+                    >
+                      <p className="text-xs font-bold uppercase tracking-normal text-black/45">
+                        {label}
+                      </p>
+                      <p className="mt-1 font-semibold text-ink">{value}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {advertisingSyncSummary && (
+                <div className="mt-3 grid gap-2 sm:grid-cols-4">
+                  {[
+                    [
+                      "Campanhas",
+                      formatNumber.format(advertisingSyncSummary.campaigns)
+                    ],
+                    ["Anuncios", formatNumber.format(advertisingSyncSummary.ads)],
+                    [
+                      "Investimento",
+                      formatCurrency.format(advertisingSyncSummary.adSpend)
+                    ],
+                    [
+                      "Receita ads",
+                      formatCurrency.format(advertisingSyncSummary.attributedRevenue)
+                    ]
+                  ].map(([label, value]) => (
+                    <div
+                      className="rounded-lg bg-rose-50 px-3 py-2 ring-1 ring-rose-100"
+                      key={label}
+                    >
+                      <p className="text-xs font-bold uppercase tracking-normal text-black/45">
+                        {label}
+                      </p>
+                      <p className="mt-1 font-semibold text-ink">{value}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {promotionsSyncSummary && (
+                <div className="mt-3 grid gap-2 sm:grid-cols-4">
+                  {[
+                    [
+                      "Promocoes",
+                      formatNumber.format(promotionsSyncSummary.promotions)
+                    ],
+                    [
+                      "Ativas",
+                      formatNumber.format(promotionsSyncSummary.activePromotions)
+                    ],
+                    [
+                      "Novas",
+                      formatNumber.format(promotionsSyncSummary.inserted)
+                    ],
+                    [
+                      "Atualizadas",
+                      formatNumber.format(promotionsSyncSummary.updated)
+                    ]
+                  ].map(([label, value]) => (
+                    <div
+                      className="rounded-lg bg-amber-50 px-3 py-2 ring-1 ring-amber-100"
                       key={label}
                     >
                       <p className="text-xs font-bold uppercase tracking-normal text-black/45">
@@ -1840,11 +2222,28 @@ export function DashmarketDashboard() {
           {activeView === "ads" && (
             <section className="mt-5 grid gap-5 xl:grid-cols-[1fr_380px]">
               <section className="rounded-lg border border-black/10 bg-white shadow-sm">
-                <div className="border-b border-black/10 p-4">
-                  <h2 className="text-lg font-bold">Publicidade por SKU</h2>
-                  <p className="text-sm text-black/60">
-                    Investimento e receita atribuida entram na mesma conta de margem.
-                  </p>
+                <div className="flex flex-col gap-3 border-b border-black/10 p-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h2 className="text-lg font-bold">Publicidade por SKU</h2>
+                    <p className="text-sm text-black/60">
+                      {realAdvertising.length > 0
+                        ? "Metricas reais de Product Ads em uso na margem."
+                        : "Investimento e receita atribuida entram na mesma conta de margem."}
+                    </p>
+                  </div>
+                  {mercadoLivreAccount && (
+                    <button
+                      className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-ink px-4 text-sm font-bold text-white hover:bg-black"
+                      disabled={
+                        supabaseStatus !== "connected" || isSyncingMarketplace
+                      }
+                      onClick={syncMercadoLivreAdvertising}
+                      type="button"
+                    >
+                      <Megaphone aria-hidden className="h-4 w-4" />
+                      {isSyncingAdvertising ? "Sincronizando" : "Sincronizar Ads"}
+                    </button>
+                  )}
                 </div>
                 <div className="table-scroll overflow-x-auto">
                   <table className="min-w-[820px] w-full text-left text-sm">
@@ -1859,7 +2258,7 @@ export function DashmarketDashboard() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-black/10">
-                      {adSpendSeed.map((row) => (
+                      {activeAdvertising.map((row) => (
                         <tr key={row.sku}>
                           <td className="px-4 py-3 font-bold">{row.sku}</td>
                           <td className="px-4 py-3">
@@ -1873,7 +2272,9 @@ export function DashmarketDashboard() {
                             {formatCurrency.format(row.attributedRevenue)}
                           </td>
                           <td className="px-4 py-3 font-bold">
-                            {formatPercent(row.amount / row.attributedRevenue)}
+                            {row.attributedRevenue > 0
+                              ? formatPercent(row.amount / row.attributedRevenue)
+                              : "0,0%"}
                           </td>
                         </tr>
                       ))}
@@ -1883,12 +2284,27 @@ export function DashmarketDashboard() {
               </section>
 
               <section className="rounded-lg border border-black/10 bg-white p-4 shadow-sm">
-                <div className="flex items-center gap-2">
-                  <Tags aria-hidden className="h-5 w-5 text-clay" />
-                  <h2 className="text-lg font-bold">Promoções ativas</h2>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <Tags aria-hidden className="h-5 w-5 text-clay" />
+                    <h2 className="text-lg font-bold">Promoções ativas</h2>
+                  </div>
+                  {mercadoLivreAccount && (
+                    <button
+                      className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-clay px-3 text-sm font-bold text-white hover:bg-amber-700"
+                      disabled={
+                        supabaseStatus !== "connected" || isSyncingMarketplace
+                      }
+                      onClick={syncMercadoLivrePromotions}
+                      type="button"
+                    >
+                      <Tags aria-hidden className="h-4 w-4" />
+                      {isSyncingPromotions ? "Atualizando" : "Atualizar"}
+                    </button>
+                  )}
                 </div>
                 <div className="mt-4 grid gap-3">
-                  {promotionRows.map((row) => (
+                  {displayPromotionRows.map((row) => (
                     <div
                       className="rounded-lg border border-black/10 bg-paper p-3"
                       key={`${row.sku}-${row.name}`}
