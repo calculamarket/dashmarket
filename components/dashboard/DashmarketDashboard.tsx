@@ -1,0 +1,962 @@
+"use client";
+
+import Link from "next/link";
+import { FormEvent, useMemo, useState } from "react";
+import {
+  BarChart3,
+  Boxes,
+  Cable,
+  CircleDollarSign,
+  ClipboardList,
+  LineChart,
+  Megaphone,
+  PackageCheck,
+  PackagePlus,
+  Percent,
+  RefreshCw,
+  Search,
+  ShieldCheck,
+  Tags,
+  WalletCards
+} from "lucide-react";
+import {
+  calculateContributionMargins,
+  type AdvertisingSpend,
+  type ContributionMarginRow,
+  type SaleRecord,
+  type SkuCost
+} from "@/lib/metrics/contribution-margin";
+import { getMarketplaceAdapter, listMarketplaceAdapters } from "@/lib/marketplaces/registry";
+import type { MarketplaceProvider } from "@/lib/marketplaces/types";
+
+type ViewKey = "margem" | "custos" | "estoque" | "ads";
+
+const salesSeed: SaleRecord[] = [
+  {
+    sku: "MLB-CABO-USB-C-1M",
+    title: "Cabo USB-C turbo 1m",
+    units: 184,
+    orders: 129,
+    grossRevenue: 10120,
+    marketplaceFees: 1540,
+    shippingCosts: 680,
+    discounts: 320,
+    taxes: 0
+  },
+  {
+    sku: "MLB-CAPA-AIR-13",
+    title: "Capa notebook Air 13",
+    units: 76,
+    orders: 61,
+    grossRevenue: 11856,
+    marketplaceFees: 1864,
+    shippingCosts: 510,
+    discounts: 420,
+    taxes: 0
+  },
+  {
+    sku: "MLB-SUPORTE-MESA-PRO",
+    title: "Suporte articulado de mesa",
+    units: 43,
+    orders: 39,
+    grossRevenue: 16770,
+    marketplaceFees: 2732,
+    shippingCosts: 940,
+    discounts: 680,
+    taxes: 0
+  },
+  {
+    sku: "MLB-FONE-BT-COMPACT",
+    title: "Fone bluetooth compacto",
+    units: 112,
+    orders: 97,
+    grossRevenue: 14224,
+    marketplaceFees: 2218,
+    shippingCosts: 795,
+    discounts: 530,
+    taxes: 0
+  }
+];
+
+const costsSeed: SkuCost[] = [
+  {
+    id: "cost-1",
+    sku: "MLB-CABO-USB-C-1M",
+    label: "Fornecedor",
+    category: "product",
+    amount: 18.9,
+    allocation: "per_unit",
+    validFrom: "2026-05-01"
+  },
+  {
+    id: "cost-2",
+    sku: "MLB-CABO-USB-C-1M",
+    label: "Embalagem",
+    category: "packaging",
+    amount: 1.25,
+    allocation: "per_unit",
+    validFrom: "2026-05-01"
+  },
+  {
+    id: "cost-3",
+    sku: "MLB-CAPA-AIR-13",
+    label: "Fornecedor",
+    category: "product",
+    amount: 72.4,
+    allocation: "per_unit",
+    validFrom: "2026-05-01"
+  },
+  {
+    id: "cost-4",
+    sku: "MLB-SUPORTE-MESA-PRO",
+    label: "Fornecedor",
+    category: "product",
+    amount: 184,
+    allocation: "per_unit",
+    validFrom: "2026-05-01"
+  },
+  {
+    id: "cost-5",
+    sku: "MLB-FONE-BT-COMPACT",
+    label: "Fornecedor",
+    category: "product",
+    amount: 48.7,
+    allocation: "per_unit",
+    validFrom: "2026-05-01"
+  }
+];
+
+const adSpendSeed: AdvertisingSpend[] = [
+  {
+    sku: "MLB-CABO-USB-C-1M",
+    amount: 870,
+    clicks: 2480,
+    impressions: 81400,
+    attributedRevenue: 4480
+  },
+  {
+    sku: "MLB-CAPA-AIR-13",
+    amount: 420,
+    clicks: 1114,
+    impressions: 35600,
+    attributedRevenue: 2910
+  },
+  {
+    sku: "MLB-SUPORTE-MESA-PRO",
+    amount: 980,
+    clicks: 1560,
+    impressions: 42200,
+    attributedRevenue: 6200
+  },
+  {
+    sku: "MLB-FONE-BT-COMPACT",
+    amount: 740,
+    clicks: 2030,
+    impressions: 61500,
+    attributedRevenue: 3890
+  }
+];
+
+const inventoryRows = [
+  {
+    sku: "MLB-CABO-USB-C-1M",
+    channel: "Full",
+    available: 420,
+    reserved: 36,
+    transfer: 280,
+    status: "Saudavel"
+  },
+  {
+    sku: "MLB-CAPA-AIR-13",
+    channel: "Full",
+    available: 96,
+    reserved: 12,
+    transfer: 40,
+    status: "Atencao"
+  },
+  {
+    sku: "MLB-SUPORTE-MESA-PRO",
+    channel: "Full",
+    available: 31,
+    reserved: 8,
+    transfer: 20,
+    status: "Critico"
+  },
+  {
+    sku: "MLB-FONE-BT-COMPACT",
+    channel: "Flex",
+    available: 188,
+    reserved: 19,
+    transfer: 0,
+    status: "Saudavel"
+  }
+];
+
+const promotionRows = [
+  {
+    sku: "MLB-CABO-USB-C-1M",
+    name: "Oferta relampago",
+    discount: "8%",
+    period: "12 a 14 mai",
+    impact: "Boa margem"
+  },
+  {
+    sku: "MLB-SUPORTE-MESA-PRO",
+    name: "Campanha marketplace",
+    discount: "R$ 24,00",
+    period: "10 a 18 mai",
+    impact: "Revisar custo"
+  }
+];
+
+const costCategoryLabel: Record<SkuCost["category"], string> = {
+  product: "Produto",
+  packaging: "Embalagem",
+  inbound_freight: "Frete entrada",
+  tax: "Tributo",
+  marketplace_fixed: "Taxa fixa",
+  other: "Outro"
+};
+
+const allocationLabel: Record<SkuCost["allocation"], string> = {
+  per_unit: "Por unidade",
+  percentage: "Percentual",
+  per_order: "Por pedido"
+};
+
+const views: Array<{ key: ViewKey; label: string; icon: typeof BarChart3 }> = [
+  { key: "margem", label: "Margem", icon: BarChart3 },
+  { key: "custos", label: "Centro de custos", icon: WalletCards },
+  { key: "estoque", label: "Estoque Full", icon: Boxes },
+  { key: "ads", label: "Publicidade", icon: Megaphone }
+];
+
+const formatCurrency = new Intl.NumberFormat("pt-BR", {
+  style: "currency",
+  currency: "BRL"
+});
+
+const formatNumber = new Intl.NumberFormat("pt-BR");
+
+function formatPercent(value: number) {
+  return `${(value * 100).toLocaleString("pt-BR", {
+    maximumFractionDigits: 1,
+    minimumFractionDigits: 1
+  })}%`;
+}
+
+function statusClass(status: string) {
+  if (status === "Critico") return "bg-rose-50 text-berry ring-rose-200";
+  if (status === "Atencao") return "bg-amber-50 text-clay ring-amber-200";
+  return "bg-emerald-50 text-sea ring-emerald-200";
+}
+
+function KpiCard({
+  title,
+  value,
+  detail,
+  icon: Icon,
+  tone = "sea"
+}: {
+  title: string;
+  value: string;
+  detail: string;
+  icon: typeof BarChart3;
+  tone?: "sea" | "moss" | "clay" | "berry";
+}) {
+  const toneClass = {
+    sea: "bg-teal-50 text-sea ring-teal-100",
+    moss: "bg-lime-50 text-moss ring-lime-100",
+    clay: "bg-amber-50 text-clay ring-amber-100",
+    berry: "bg-rose-50 text-berry ring-rose-100"
+  }[tone];
+
+  return (
+    <section className="rounded-lg border border-black/10 bg-white p-4 shadow-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-normal text-black/50">
+            {title}
+          </p>
+          <p className="mt-2 text-2xl font-semibold tracking-normal text-ink">{value}</p>
+        </div>
+        <span className={`grid h-10 w-10 place-items-center rounded-lg ring-1 ${toneClass}`}>
+          <Icon aria-hidden className="h-5 w-5" />
+        </span>
+      </div>
+      <p className="mt-3 text-sm text-black/60">{detail}</p>
+    </section>
+  );
+}
+
+function ModuleButton({
+  view,
+  activeView,
+  onClick
+}: {
+  view: (typeof views)[number];
+  activeView: ViewKey;
+  onClick: (view: ViewKey) => void;
+}) {
+  const Icon = view.icon;
+
+  return (
+    <button
+      className={`flex h-10 items-center gap-2 rounded-lg px-3 text-sm font-semibold ring-1 transition ${
+        activeView === view.key
+          ? "bg-ink text-white ring-ink"
+          : "bg-white text-ink ring-black/10 hover:bg-black/[0.03]"
+      }`}
+      onClick={() => onClick(view.key)}
+      type="button"
+    >
+      <Icon aria-hidden className="h-4 w-4" />
+      <span>{view.label}</span>
+    </button>
+  );
+}
+
+function marginTone(row: ContributionMarginRow) {
+  if (row.contributionMarginRate < 0.12) return "text-berry";
+  if (row.contributionMarginRate < 0.22) return "text-clay";
+  return "text-sea";
+}
+
+export function DashmarketDashboard() {
+  const [selectedProvider, setSelectedProvider] =
+    useState<MarketplaceProvider>("mercadolivre");
+  const [activeView, setActiveView] = useState<ViewKey>("margem");
+  const [skuFilter, setSkuFilter] = useState("");
+  const [costs, setCosts] = useState<SkuCost[]>(costsSeed);
+  const [costForm, setCostForm] = useState({
+    sku: salesSeed[0].sku,
+    label: "",
+    category: "product" as SkuCost["category"],
+    amount: "",
+    allocation: "per_unit" as SkuCost["allocation"],
+    validFrom: "2026-05-01"
+  });
+
+  const selectedAdapter = getMarketplaceAdapter(selectedProvider);
+  const marginRows = useMemo(
+    () => calculateContributionMargins(salesSeed, costs, adSpendSeed),
+    [costs]
+  );
+
+  const filteredMargins = marginRows.filter((row) => {
+    const query = skuFilter.trim().toLowerCase();
+    return (
+      !query ||
+      row.sku.toLowerCase().includes(query) ||
+      row.title.toLowerCase().includes(query)
+    );
+  });
+
+  const totals = marginRows.reduce(
+    (acc, row) => ({
+      grossRevenue: acc.grossRevenue + row.grossRevenue,
+      netRevenue: acc.netRevenue + row.netRevenue,
+      marketplaceFees: acc.marketplaceFees + row.marketplaceFees,
+      shippingCosts: acc.shippingCosts + row.shippingCosts,
+      discounts: acc.discounts + row.discounts,
+      skuCosts: acc.skuCosts + row.skuCosts,
+      advertisingCosts: acc.advertisingCosts + row.advertisingCosts,
+      contributionMargin: acc.contributionMargin + row.contributionMargin,
+      units: acc.units + row.units
+    }),
+    {
+      grossRevenue: 0,
+      netRevenue: 0,
+      marketplaceFees: 0,
+      shippingCosts: 0,
+      discounts: 0,
+      skuCosts: 0,
+      advertisingCosts: 0,
+      contributionMargin: 0,
+      units: 0
+    }
+  );
+
+  const marginRate =
+    totals.netRevenue > 0 ? totals.contributionMargin / totals.netRevenue : 0;
+
+  function addCost(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!costForm.label.trim() || !costForm.amount) return;
+
+    setCosts((current) => [
+      ...current,
+      {
+        id:
+          typeof crypto !== "undefined" && "randomUUID" in crypto
+            ? crypto.randomUUID()
+            : `cost-${Date.now()}`,
+        sku: costForm.sku,
+        label: costForm.label.trim(),
+        category: costForm.category,
+        amount: Number(costForm.amount),
+        allocation: costForm.allocation,
+        validFrom: costForm.validFrom
+      }
+    ]);
+
+    setCostForm((current) => ({ ...current, label: "", amount: "" }));
+  }
+
+  return (
+    <main className="min-h-screen bg-paper text-ink">
+      <div className="flex min-h-screen flex-col lg:flex-row">
+        <aside className="border-b border-black/10 bg-ink px-4 py-4 text-white lg:min-h-screen lg:w-72 lg:border-b-0 lg:border-r">
+          <div className="flex items-center justify-between gap-4 lg:block">
+            <div>
+              <div className="flex items-center gap-3">
+                <span className="grid h-10 w-10 place-items-center rounded-lg bg-white text-sm font-black text-ink">
+                  DM
+                </span>
+                <div>
+                  <p className="text-lg font-black tracking-normal">DASHMARKET</p>
+                  <p className="text-xs text-white/60">Marketplace intelligence</p>
+                </div>
+              </div>
+            </div>
+            <Link
+              className="inline-flex h-9 items-center gap-2 rounded-lg bg-white/10 px-3 text-sm font-semibold text-white ring-1 ring-white/20 hover:bg-white/20 lg:mt-6"
+              href="/login"
+            >
+              <ShieldCheck aria-hidden className="h-4 w-4" />
+              Entrar
+            </Link>
+          </div>
+
+          <nav className="mt-5 grid grid-cols-2 gap-2 lg:grid-cols-1">
+            {views.map((view) => {
+              const Icon = view.icon;
+              return (
+                <button
+                  className={`flex h-10 items-center gap-2 rounded-lg px-3 text-left text-sm font-semibold transition ${
+                    activeView === view.key
+                      ? "bg-white text-ink"
+                      : "bg-white/10 text-white/70 hover:bg-white/20"
+                  }`}
+                  key={view.key}
+                  onClick={() => setActiveView(view.key)}
+                  type="button"
+                >
+                  <Icon aria-hidden className="h-4 w-4" />
+                  {view.label}
+                </button>
+              );
+            })}
+          </nav>
+
+          <section className="mt-6 rounded-lg border border-white/10 bg-white/10 p-4">
+            <div className="flex items-center gap-2 text-sm font-semibold">
+              <Cable aria-hidden className="h-4 w-4 text-teal-200" />
+              Conector ativo
+            </div>
+            <p className="mt-3 text-2xl font-semibold">{selectedAdapter.displayName}</p>
+            <p className="mt-1 text-sm text-white/60">
+              Estrutura pronta para multiplos marketplaces.
+            </p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              {selectedAdapter.capabilities.map((capability) => (
+                <span
+                  className="rounded-lg bg-white/10 px-2 py-1 text-xs font-semibold text-white/80"
+                  key={capability}
+                >
+                  {capability}
+                </span>
+              ))}
+            </div>
+          </section>
+        </aside>
+
+        <section className="flex-1 px-4 py-5 sm:px-6 lg:px-8">
+          <header className="flex flex-col gap-4 border-b border-black/10 pb-5 xl:flex-row xl:items-center xl:justify-between">
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-normal text-black/50">
+                Visao operacional
+              </p>
+              <h1 className="mt-1 text-3xl font-black tracking-normal text-ink sm:text-4xl">
+                Margem, estoque e crescimento por SKU
+              </h1>
+            </div>
+
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+              <div className="flex rounded-lg bg-white p-1 ring-1 ring-black/10">
+                {listMarketplaceAdapters().slice(0, 3).map((adapter) => (
+                  <button
+                    className={`h-9 rounded-md px-3 text-sm font-semibold ${
+                      selectedProvider === adapter.provider
+                        ? "bg-ink text-white"
+                        : "text-black/60 hover:bg-black/[0.04]"
+                    }`}
+                    key={adapter.provider}
+                    onClick={() => setSelectedProvider(adapter.provider)}
+                    type="button"
+                  >
+                    {adapter.displayName}
+                  </button>
+                ))}
+              </div>
+              <button
+                className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-sea px-4 text-sm font-bold text-white shadow-sm hover:bg-teal-800"
+                type="button"
+              >
+                <RefreshCw aria-hidden className="h-4 w-4" />
+                Sincronizar
+              </button>
+            </div>
+          </header>
+
+          <section className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <KpiCard
+              detail={`${formatNumber.format(totals.units)} unidades vendidas no periodo`}
+              icon={CircleDollarSign}
+              title="Receita liquida"
+              value={formatCurrency.format(totals.netRevenue)}
+            />
+            <KpiCard
+              detail={`${formatPercent(marginRate)} sobre a receita liquida`}
+              icon={Percent}
+              title="Margem contribuicao"
+              tone={marginRate < 0.18 ? "clay" : "moss"}
+              value={formatCurrency.format(totals.contributionMargin)}
+            />
+            <KpiCard
+              detail="Inclui produto, embalagem e custos por SKU"
+              icon={WalletCards}
+              title="Custos cadastrados"
+              tone="clay"
+              value={formatCurrency.format(totals.skuCosts)}
+            />
+            <KpiCard
+              detail="Investimento atribuido aos SKUs vendidos"
+              icon={Megaphone}
+              title="Publicidade"
+              tone="berry"
+              value={formatCurrency.format(totals.advertisingCosts)}
+            />
+          </section>
+
+          <section className="mt-5 rounded-lg border border-black/10 bg-white p-3 shadow-sm">
+            <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+              <div className="flex flex-wrap gap-2">
+                {views.map((view) => (
+                  <ModuleButton
+                    activeView={activeView}
+                    key={view.key}
+                    onClick={setActiveView}
+                    view={view}
+                  />
+                ))}
+              </div>
+              <label className="relative block min-w-0 sm:w-80">
+                <Search
+                  aria-hidden
+                  className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-black/40"
+                />
+                <input
+                  className="h-10 w-full rounded-lg border border-black/10 bg-paper pl-9 pr-3 text-sm outline-none ring-sea/25 placeholder:text-black/40 focus:ring-4"
+                  onChange={(event) => setSkuFilter(event.target.value)}
+                  placeholder="Buscar SKU ou produto"
+                  value={skuFilter}
+                />
+              </label>
+            </div>
+          </section>
+
+          {activeView === "margem" && (
+            <section className="mt-5 rounded-lg border border-black/10 bg-white shadow-sm">
+              <div className="flex flex-col gap-2 border-b border-black/10 p-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h2 className="text-lg font-bold">Conciliação da margem por SKU</h2>
+                  <p className="text-sm text-black/60">
+                    Receita, taxas, frete, custos internos e publicidade no mesmo lugar.
+                  </p>
+                </div>
+                <span className="inline-flex h-8 items-center gap-2 rounded-lg bg-emerald-50 px-3 text-sm font-semibold text-sea ring-1 ring-emerald-100">
+                  <PackageCheck aria-hidden className="h-4 w-4" />
+                  Base preparada para conciliar pedidos
+                </span>
+              </div>
+              <div className="table-scroll overflow-x-auto">
+                <table className="min-w-[980px] w-full text-left text-sm">
+                  <thead className="bg-black/[0.025] text-xs uppercase tracking-normal text-black/50">
+                    <tr>
+                      <th className="px-4 py-3">SKU</th>
+                      <th className="px-4 py-3">Receita liquida</th>
+                      <th className="px-4 py-3">Taxas</th>
+                      <th className="px-4 py-3">Frete</th>
+                      <th className="px-4 py-3">Custo SKU</th>
+                      <th className="px-4 py-3">Ads</th>
+                      <th className="px-4 py-3">Margem</th>
+                      <th className="px-4 py-3">%</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-black/10">
+                    {filteredMargins.map((row) => (
+                      <tr className="hover:bg-black/[0.018]" key={row.sku}>
+                        <td className="px-4 py-3">
+                          <p className="font-bold text-ink">{row.sku}</p>
+                          <p className="text-xs text-black/50">{row.title}</p>
+                        </td>
+                        <td className="px-4 py-3 font-semibold">
+                          {formatCurrency.format(row.netRevenue)}
+                        </td>
+                        <td className="px-4 py-3 text-black/60">
+                          {formatCurrency.format(row.marketplaceFees)}
+                        </td>
+                        <td className="px-4 py-3 text-black/60">
+                          {formatCurrency.format(row.shippingCosts)}
+                        </td>
+                        <td className="px-4 py-3 text-black/60">
+                          {formatCurrency.format(row.skuCosts)}
+                        </td>
+                        <td className="px-4 py-3 text-black/60">
+                          {formatCurrency.format(row.advertisingCosts)}
+                        </td>
+                        <td className={`px-4 py-3 font-bold ${marginTone(row)}`}>
+                          {formatCurrency.format(row.contributionMargin)}
+                        </td>
+                        <td className={`px-4 py-3 font-bold ${marginTone(row)}`}>
+                          {formatPercent(row.contributionMarginRate)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          )}
+
+          {activeView === "custos" && (
+            <section className="mt-5 grid gap-5 xl:grid-cols-[380px_1fr]">
+              <form
+                className="rounded-lg border border-black/10 bg-white p-4 shadow-sm"
+                onSubmit={addCost}
+              >
+                <div className="flex items-center gap-2">
+                  <PackagePlus aria-hidden className="h-5 w-5 text-sea" />
+                  <h2 className="text-lg font-bold">Cadastrar custo do SKU</h2>
+                </div>
+
+                <div className="mt-4 grid gap-3">
+                  <label className="grid gap-1 text-sm font-semibold">
+                    SKU
+                    <select
+                      className="h-10 rounded-lg border border-black/10 bg-paper px-3 font-normal outline-none focus:ring-4 focus:ring-sea/20"
+                      onChange={(event) =>
+                        setCostForm((current) => ({
+                          ...current,
+                          sku: event.target.value
+                        }))
+                      }
+                      value={costForm.sku}
+                    >
+                      {salesSeed.map((sale) => (
+                        <option key={sale.sku} value={sale.sku}>
+                          {sale.sku}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="grid gap-1 text-sm font-semibold">
+                    Nome do custo
+                    <input
+                      className="h-10 rounded-lg border border-black/10 bg-paper px-3 font-normal outline-none focus:ring-4 focus:ring-sea/20"
+                      onChange={(event) =>
+                        setCostForm((current) => ({
+                          ...current,
+                          label: event.target.value
+                        }))
+                      }
+                      placeholder="Fornecedor, embalagem, imposto"
+                      value={costForm.label}
+                    />
+                  </label>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <label className="grid gap-1 text-sm font-semibold">
+                      Categoria
+                      <select
+                        className="h-10 rounded-lg border border-black/10 bg-paper px-3 font-normal outline-none focus:ring-4 focus:ring-sea/20"
+                        onChange={(event) =>
+                          setCostForm((current) => ({
+                            ...current,
+                            category: event.target.value as SkuCost["category"]
+                          }))
+                        }
+                        value={costForm.category}
+                      >
+                        {Object.entries(costCategoryLabel).map(([key, label]) => (
+                          <option key={key} value={key}>
+                            {label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="grid gap-1 text-sm font-semibold">
+                      Alocação
+                      <select
+                        className="h-10 rounded-lg border border-black/10 bg-paper px-3 font-normal outline-none focus:ring-4 focus:ring-sea/20"
+                        onChange={(event) =>
+                          setCostForm((current) => ({
+                            ...current,
+                            allocation: event.target.value as SkuCost["allocation"]
+                          }))
+                        }
+                        value={costForm.allocation}
+                      >
+                        {Object.entries(allocationLabel).map(([key, label]) => (
+                          <option key={key} value={key}>
+                            {label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <label className="grid gap-1 text-sm font-semibold">
+                      Valor
+                      <input
+                        className="h-10 rounded-lg border border-black/10 bg-paper px-3 font-normal outline-none focus:ring-4 focus:ring-sea/20"
+                        min="0"
+                        onChange={(event) =>
+                          setCostForm((current) => ({
+                            ...current,
+                            amount: event.target.value
+                          }))
+                        }
+                        placeholder="0,00"
+                        step="0.01"
+                        type="number"
+                        value={costForm.amount}
+                      />
+                    </label>
+                    <label className="grid gap-1 text-sm font-semibold">
+                      Vigencia
+                      <input
+                        className="h-10 rounded-lg border border-black/10 bg-paper px-3 font-normal outline-none focus:ring-4 focus:ring-sea/20"
+                        onChange={(event) =>
+                          setCostForm((current) => ({
+                            ...current,
+                            validFrom: event.target.value
+                          }))
+                        }
+                        type="date"
+                        value={costForm.validFrom}
+                      />
+                    </label>
+                  </div>
+
+                  <button
+                    className="mt-1 inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-ink px-4 text-sm font-bold text-white hover:bg-black"
+                    type="submit"
+                  >
+                    <PackagePlus aria-hidden className="h-4 w-4" />
+                    Adicionar custo
+                  </button>
+                </div>
+              </form>
+
+              <section className="rounded-lg border border-black/10 bg-white shadow-sm">
+                <div className="border-b border-black/10 p-4">
+                  <h2 className="text-lg font-bold">Custos ativos</h2>
+                  <p className="text-sm text-black/60">
+                    Cada lançamento entra no cálculo de margem respeitando SKU e vigência.
+                  </p>
+                </div>
+                <div className="table-scroll overflow-x-auto">
+                  <table className="min-w-[780px] w-full text-left text-sm">
+                    <thead className="bg-black/[0.025] text-xs uppercase tracking-normal text-black/50">
+                      <tr>
+                        <th className="px-4 py-3">SKU</th>
+                        <th className="px-4 py-3">Custo</th>
+                        <th className="px-4 py-3">Categoria</th>
+                        <th className="px-4 py-3">Alocação</th>
+                        <th className="px-4 py-3">Valor</th>
+                        <th className="px-4 py-3">Desde</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-black/10">
+                      {costs.map((cost) => (
+                        <tr key={cost.id}>
+                          <td className="px-4 py-3 font-bold">{cost.sku}</td>
+                          <td className="px-4 py-3">{cost.label}</td>
+                          <td className="px-4 py-3">
+                            {costCategoryLabel[cost.category]}
+                          </td>
+                          <td className="px-4 py-3">{allocationLabel[cost.allocation]}</td>
+                          <td className="px-4 py-3 font-semibold">
+                            {cost.allocation === "percentage"
+                              ? `${cost.amount}%`
+                              : formatCurrency.format(cost.amount)}
+                          </td>
+                          <td className="px-4 py-3">{cost.validFrom}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            </section>
+          )}
+
+          {activeView === "estoque" && (
+            <section className="mt-5 grid gap-5 xl:grid-cols-[1fr_360px]">
+              <section className="rounded-lg border border-black/10 bg-white shadow-sm">
+                <div className="border-b border-black/10 p-4">
+                  <h2 className="text-lg font-bold">Estoque por canal de envio</h2>
+                  <p className="text-sm text-black/60">
+                    Pronto para receber snapshots do Full e demais modalidades.
+                  </p>
+                </div>
+                <div className="table-scroll overflow-x-auto">
+                  <table className="min-w-[780px] w-full text-left text-sm">
+                    <thead className="bg-black/[0.025] text-xs uppercase tracking-normal text-black/50">
+                      <tr>
+                        <th className="px-4 py-3">SKU</th>
+                        <th className="px-4 py-3">Canal</th>
+                        <th className="px-4 py-3">Disponivel</th>
+                        <th className="px-4 py-3">Reservado</th>
+                        <th className="px-4 py-3">Em transferencia</th>
+                        <th className="px-4 py-3">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-black/10">
+                      {inventoryRows.map((row) => (
+                        <tr key={row.sku}>
+                          <td className="px-4 py-3 font-bold">{row.sku}</td>
+                          <td className="px-4 py-3">{row.channel}</td>
+                          <td className="px-4 py-3">{formatNumber.format(row.available)}</td>
+                          <td className="px-4 py-3">{formatNumber.format(row.reserved)}</td>
+                          <td className="px-4 py-3">{formatNumber.format(row.transfer)}</td>
+                          <td className="px-4 py-3">
+                            <span
+                              className={`inline-flex rounded-lg px-2 py-1 text-xs font-bold ring-1 ${statusClass(row.status)}`}
+                            >
+                              {row.status}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+
+              <section className="rounded-lg border border-black/10 bg-white p-4 shadow-sm">
+                <div className="flex items-center gap-2">
+                  <ClipboardList aria-hidden className="h-5 w-5 text-sea" />
+                  <h2 className="text-lg font-bold">Fila de sincronização</h2>
+                </div>
+                <div className="mt-4 grid gap-3">
+                  {["orders", "inventory", "listings", "promotions"].map((item, index) => (
+                    <div
+                      className="flex items-center justify-between rounded-lg border border-black/10 bg-paper px-3 py-3"
+                      key={item}
+                    >
+                      <span className="text-sm font-semibold">{item}</span>
+                      <span className="text-xs font-bold text-black/50">
+                        {index === 0 ? "15 min" : "1 h"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            </section>
+          )}
+
+          {activeView === "ads" && (
+            <section className="mt-5 grid gap-5 xl:grid-cols-[1fr_380px]">
+              <section className="rounded-lg border border-black/10 bg-white shadow-sm">
+                <div className="border-b border-black/10 p-4">
+                  <h2 className="text-lg font-bold">Publicidade por SKU</h2>
+                  <p className="text-sm text-black/60">
+                    Investimento e receita atribuida entram na mesma conta de margem.
+                  </p>
+                </div>
+                <div className="table-scroll overflow-x-auto">
+                  <table className="min-w-[820px] w-full text-left text-sm">
+                    <thead className="bg-black/[0.025] text-xs uppercase tracking-normal text-black/50">
+                      <tr>
+                        <th className="px-4 py-3">SKU</th>
+                        <th className="px-4 py-3">Investimento</th>
+                        <th className="px-4 py-3">Cliques</th>
+                        <th className="px-4 py-3">Impressões</th>
+                        <th className="px-4 py-3">Receita atribuida</th>
+                        <th className="px-4 py-3">ACOS</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-black/10">
+                      {adSpendSeed.map((row) => (
+                        <tr key={row.sku}>
+                          <td className="px-4 py-3 font-bold">{row.sku}</td>
+                          <td className="px-4 py-3">
+                            {formatCurrency.format(row.amount)}
+                          </td>
+                          <td className="px-4 py-3">{formatNumber.format(row.clicks)}</td>
+                          <td className="px-4 py-3">
+                            {formatNumber.format(row.impressions)}
+                          </td>
+                          <td className="px-4 py-3">
+                            {formatCurrency.format(row.attributedRevenue)}
+                          </td>
+                          <td className="px-4 py-3 font-bold">
+                            {formatPercent(row.amount / row.attributedRevenue)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+
+              <section className="rounded-lg border border-black/10 bg-white p-4 shadow-sm">
+                <div className="flex items-center gap-2">
+                  <Tags aria-hidden className="h-5 w-5 text-clay" />
+                  <h2 className="text-lg font-bold">Promoções ativas</h2>
+                </div>
+                <div className="mt-4 grid gap-3">
+                  {promotionRows.map((row) => (
+                    <div
+                      className="rounded-lg border border-black/10 bg-paper p-3"
+                      key={`${row.sku}-${row.name}`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="font-bold">{row.name}</p>
+                          <p className="text-sm text-black/60">{row.sku}</p>
+                        </div>
+                        <span className="rounded-lg bg-amber-50 px-2 py-1 text-xs font-bold text-clay ring-1 ring-amber-100">
+                          {row.discount}
+                        </span>
+                      </div>
+                      <div className="mt-3 flex items-center justify-between text-sm">
+                        <span>{row.period}</span>
+                        <span className="font-semibold text-black/60">{row.impact}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            </section>
+          )}
+
+          <footer className="mt-6 flex flex-col gap-2 pb-4 text-sm text-black/50 sm:flex-row sm:items-center sm:justify-between">
+            <span>Dados demonstrativos enquanto o Supabase e Mercado Livre sao conectados.</span>
+            <span className="inline-flex items-center gap-2">
+              <LineChart aria-hidden className="h-4 w-4" />
+              Preparado para historico e conciliacao por periodo
+            </span>
+          </footer>
+        </section>
+      </div>
+    </main>
+  );
+}
