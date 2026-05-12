@@ -46,6 +46,25 @@ type ProductRow = {
   title: string;
 };
 
+type MarketplaceAccountRow = {
+  id: string;
+  provider: MarketplaceProvider;
+  external_seller_id: string;
+  account_name: string;
+  site_id: string | null;
+  status: "pending" | "connected" | "expired" | "disabled";
+  last_sync_at: string | null;
+};
+
+type SyncListingsSummary = {
+  accountName: string;
+  fetchedItems: number;
+  remoteTotal: number;
+  syncedListings: number;
+  syncedProducts: number;
+  syncedAt: string;
+};
+
 type CostCenterRow = {
   id: string;
   cost_name: string;
@@ -387,9 +406,16 @@ export function DashmarketDashboard() {
   const [supabaseStatus, setSupabaseStatus] =
     useState<SupabaseStatus>("checking");
   const [realProducts, setRealProducts] = useState<ProductRow[]>([]);
+  const [marketplaceAccounts, setMarketplaceAccounts] = useState<
+    MarketplaceAccountRow[]
+  >([]);
   const [dataMessage, setDataMessage] = useState<string | null>(null);
   const [isSavingCost, setIsSavingCost] = useState(false);
   const [isConnectingMarketplace, setIsConnectingMarketplace] = useState(false);
+  const [isSyncingListings, setIsSyncingListings] = useState(false);
+  const [syncSummary, setSyncSummary] = useState<SyncListingsSummary | null>(
+    null
+  );
   const [costForm, setCostForm] = useState({
     sku: salesSeed[0].sku,
     label: "",
@@ -411,6 +437,9 @@ export function DashmarketDashboard() {
   );
 
   const selectedAdapter = getMarketplaceAdapter(selectedProvider);
+  const mercadoLivreAccount = marketplaceAccounts.find(
+    (account) => account.provider === "mercadolivre" && account.status === "connected"
+  );
   const marginRows = useMemo(
     () => calculateContributionMargins(salesSeed, costs, adSpendSeed),
     [costs]
@@ -484,6 +513,22 @@ export function DashmarketDashboard() {
     setCosts(mappedCosts);
   }, [supabaseClient]);
 
+  const loadMarketplaceAccounts = useCallback(async (organizationId: string) => {
+    if (!supabaseClient) return;
+
+    const { data, error } = await supabaseClient
+      .from("marketplace_accounts")
+      .select(
+        "id, provider, external_seller_id, account_name, site_id, status, last_sync_at"
+      )
+      .eq("organization_id", organizationId)
+      .order("last_sync_at", { ascending: false });
+
+    if (error) throw error;
+
+    setMarketplaceAccounts((data ?? []) as MarketplaceAccountRow[]);
+  }, [supabaseClient]);
+
   useEffect(() => {
     let isMounted = true;
 
@@ -531,8 +576,10 @@ export function DashmarketDashboard() {
 
         if (currentOrganization) {
           await loadCostCenter(currentOrganization.id);
+          await loadMarketplaceAccounts(currentOrganization.id);
         } else {
           setCosts([]);
+          setMarketplaceAccounts([]);
           setDataMessage("Usuario autenticado, mas sem empresa vinculada.");
         }
       } catch (error) {
@@ -552,7 +599,7 @@ export function DashmarketDashboard() {
     return () => {
       isMounted = false;
     };
-  }, [loadCostCenter, supabaseClient]);
+  }, [loadCostCenter, loadMarketplaceAccounts, supabaseClient]);
 
   async function addCost(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -639,6 +686,8 @@ export function DashmarketDashboard() {
     setUserEmail(null);
     setOrganization(null);
     setRealProducts([]);
+    setMarketplaceAccounts([]);
+    setSyncSummary(null);
     setCosts(costsSeed);
     setDataMessage("Sessao encerrada.");
   }
@@ -670,6 +719,62 @@ export function DashmarketDashboard() {
           : "Nao foi possivel conectar o Mercado Livre."
       );
       setIsConnectingMarketplace(false);
+    }
+  }
+
+  async function syncMercadoLivreListings() {
+    if (!supabaseClient || !organization) {
+      setDataMessage("Entre no DASHMARKET antes de sincronizar anuncios.");
+      return;
+    }
+
+    setIsSyncingListings(true);
+    setDataMessage(null);
+
+    try {
+      const { data: sessionData, error: sessionError } =
+        await supabaseClient.auth.getSession();
+
+      if (sessionError) throw sessionError;
+
+      const accessToken = sessionData.session?.access_token;
+      if (!accessToken) throw new Error("Sessao expirada. Entre novamente.");
+
+      const response = await fetch("/api/marketplaces/mercadolivre/sync-listings", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({ organizationId: organization.id })
+      });
+
+      const payload = (await response.json()) as
+        | SyncListingsSummary
+        | { error?: string };
+
+      if (!response.ok) {
+        throw new Error(
+          "error" in payload && payload.error
+            ? payload.error
+            : "Nao foi possivel sincronizar anuncios."
+        );
+      }
+
+      setSyncSummary(payload as SyncListingsSummary);
+      setDataMessage(
+        `Sincronizacao concluida: ${(payload as SyncListingsSummary).syncedListings} anuncios e ${(payload as SyncListingsSummary).syncedProducts} SKUs.`
+      );
+      await loadCostCenter(organization.id);
+      await loadMarketplaceAccounts(organization.id);
+    } catch (error) {
+      setDataMessage(
+        error instanceof Error
+          ? error.message
+          : "Nao foi possivel sincronizar anuncios."
+      );
+    } finally {
+      setIsSyncingListings(false);
     }
   }
 
@@ -761,14 +866,24 @@ export function DashmarketDashboard() {
             </p>
             <div className="mt-4 rounded-lg bg-black/15 p-3 text-xs text-white/72">
               <p className="font-bold text-white">
-                {organization?.name ?? "Modo demonstrativo"}
+                {mercadoLivreAccount?.account_name ??
+                  organization?.name ??
+                  "Modo demonstrativo"}
               </p>
               <p className="mt-1">
-                {userEmail ??
-                  (supabaseStatus === "checking"
-                    ? "Verificando sessao"
-                    : "Entre para gravar custos reais")}
+                {mercadoLivreAccount
+                  ? `Seller ${mercadoLivreAccount.external_seller_id}`
+                  : userEmail ??
+                    (supabaseStatus === "checking"
+                      ? "Verificando sessao"
+                      : "Entre para gravar custos reais")}
               </p>
+              {mercadoLivreAccount?.last_sync_at && (
+                <p className="mt-1">
+                  Ultima sync{" "}
+                  {new Date(mercadoLivreAccount.last_sync_at).toLocaleString("pt-BR")}
+                </p>
+              )}
             </div>
             <div className="mt-4 flex flex-wrap gap-2">
               {selectedAdapter.capabilities.map((capability) => (
@@ -785,13 +900,22 @@ export function DashmarketDashboard() {
               disabled={
                 selectedProvider !== "mercadolivre" ||
                 supabaseStatus !== "connected" ||
-                isConnectingMarketplace
+                isConnectingMarketplace ||
+                isSyncingListings
               }
-              onClick={connectMercadoLivre}
+              onClick={
+                mercadoLivreAccount ? syncMercadoLivreListings : connectMercadoLivre
+              }
               type="button"
             >
               <Cable aria-hidden className="h-4 w-4" />
-              {isConnectingMarketplace ? "Conectando" : "Conectar Mercado Livre"}
+              {isConnectingMarketplace
+                ? "Conectando"
+                : isSyncingListings
+                  ? "Sincronizando"
+                  : mercadoLivreAccount
+                    ? "Sincronizar SKUs"
+                    : "Conectar Mercado Livre"}
             </button>
           </section>
         </aside>
@@ -828,15 +952,27 @@ export function DashmarketDashboard() {
                 className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-sea px-4 text-sm font-bold text-white shadow-sm hover:bg-teal-800"
                 onClick={
                   selectedProvider === "mercadolivre"
-                    ? connectMercadoLivre
+                    ? mercadoLivreAccount
+                      ? syncMercadoLivreListings
+                      : connectMercadoLivre
                     : undefined
+                }
+                disabled={
+                  selectedProvider !== "mercadolivre" ||
+                  supabaseStatus !== "connected" ||
+                  isConnectingMarketplace ||
+                  isSyncingListings
                 }
                 type="button"
               >
                 <RefreshCw aria-hidden className="h-4 w-4" />
-                {selectedProvider === "mercadolivre"
-                  ? "Conectar ML"
-                  : "Sincronizar"}
+                {selectedProvider === "mercadolivre" && mercadoLivreAccount
+                  ? isSyncingListings
+                    ? "Sincronizando"
+                    : "Sincronizar SKUs"
+                  : selectedProvider === "mercadolivre"
+                    ? "Conectar ML"
+                    : "Sincronizar"}
               </button>
             </div>
           </header>
@@ -909,6 +1045,29 @@ export function DashmarketDashboard() {
                 {dataMessage ??
                   "Custos cadastrados nesta tela ja sao salvos no banco. Vendas, estoque e publicidade seguem demonstrativos ate conectarmos o Mercado Livre."}
               </p>
+              {syncSummary && (
+                <div className="mt-3 grid gap-2 sm:grid-cols-4">
+                  {[
+                    ["Conta", syncSummary.accountName],
+                    ["Anuncios", formatNumber.format(syncSummary.syncedListings)],
+                    ["SKUs", formatNumber.format(syncSummary.syncedProducts)],
+                    [
+                      "Atualizado",
+                      new Date(syncSummary.syncedAt).toLocaleString("pt-BR")
+                    ]
+                  ].map(([label, value]) => (
+                    <div
+                      className="rounded-lg bg-paper px-3 py-2 ring-1 ring-black/10"
+                      key={label}
+                    >
+                      <p className="text-xs font-bold uppercase tracking-normal text-black/45">
+                        {label}
+                      </p>
+                      <p className="mt-1 font-semibold text-ink">{value}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
             </section>
           )}
 
