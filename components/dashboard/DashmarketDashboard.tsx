@@ -34,7 +34,13 @@ import { getMarketplaceAdapter, listMarketplaceAdapters } from "@/lib/marketplac
 import type { MarketplaceProvider } from "@/lib/marketplaces/types";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 
-type ViewKey = "margem" | "vendas" | "custos" | "estoque" | "ads";
+type ViewKey =
+  | "margem"
+  | "produtos"
+  | "vendas"
+  | "custos"
+  | "estoque"
+  | "ads";
 type SupabaseStatus = "checking" | "demo" | "connected" | "error";
 
 type Organization = {
@@ -335,6 +341,29 @@ type CostCenterProductRow = {
   contributionMarginRate: number;
 };
 
+type ProductUnitRow = {
+  sku: string;
+  title: string;
+  units: number;
+  orders: number;
+  averagePrice: number;
+  discountUnit: number;
+  productCostUnit: number;
+  packagingCostUnit: number;
+  inboundFreightUnit: number;
+  marketplaceFixedUnit: number;
+  otherCostUnit: number;
+  taxUnit: number;
+  marketplaceFeeUnit: number;
+  shippingSellerUnit: number;
+  advertisingUnit: number;
+  tacosRate: number;
+  totalCostUnit: number;
+  contributionMarginUnit: number;
+  contributionMarginRate: number;
+  hasSales: boolean;
+};
+
 type InventorySnapshotRow = {
   seller_sku: string | null;
   fulfillment_channel: string;
@@ -580,6 +609,7 @@ const allocationLabel: Record<SkuCost["allocation"], string> = {
 
 const views: Array<{ key: ViewKey; label: string; icon: typeof BarChart3 }> = [
   { key: "margem", label: "Margem", icon: BarChart3 },
+  { key: "produtos", label: "Produtos", icon: PackageCheck },
   { key: "vendas", label: "Vendas", icon: ClipboardList },
   { key: "custos", label: "Centro de custos", icon: WalletCards },
   { key: "estoque", label: "Estoque Full", icon: Boxes },
@@ -1287,6 +1317,140 @@ export function DashmarketDashboard() {
 
   const marginRate =
     totals.netRevenue > 0 ? totals.contributionMargin / totals.netRevenue : 0;
+
+  const productUnitRows = useMemo<ProductUnitRow[]>(
+    () =>
+      productOptions
+        .map((product) => {
+          const sale = activeSales.find((record) => record.sku === product.sku);
+          const productCosts = costs.filter((cost) => cost.sku === product.sku);
+          const units = sale?.units ?? 0;
+          const orders = sale?.orders ?? 0;
+          const grossRevenue = sale?.grossRevenue ?? 0;
+          const averagePrice = units > 0 ? grossRevenue / units : 0;
+          const unitsPerOrder = units > 0 && orders > 0 ? units / orders : 1;
+          const costUnitAmount = (cost: SkuCost) => {
+            if (cost.allocation === "percentage") {
+              return averagePrice * (cost.amount / 100);
+            }
+
+            if (cost.allocation === "per_order") {
+              return unitsPerOrder > 0 ? cost.amount / unitsPerOrder : cost.amount;
+            }
+
+            return cost.amount;
+          };
+          const sumCosts = (predicate: (cost: SkuCost) => boolean) =>
+            productCosts
+              .filter(predicate)
+              .reduce((total, cost) => total + costUnitAmount(cost), 0);
+          const productCostUnit = sumCosts((cost) => cost.category === "product");
+          const packagingCostUnit = sumCosts(
+            (cost) => cost.category === "packaging"
+          );
+          const inboundFreightUnit = sumCosts(
+            (cost) => cost.category === "inbound_freight"
+          );
+          const marketplaceFixedUnit = sumCosts(
+            (cost) => cost.category === "marketplace_fixed"
+          );
+          const otherCostUnit = sumCosts((cost) => cost.category === "other");
+          const registeredTaxUnit = sumCosts((cost) => cost.category === "tax");
+          const saleTaxUnit = units > 0 ? (sale?.taxes ?? 0) / units : 0;
+          const taxUnit = registeredTaxUnit + saleTaxUnit;
+          const discountUnit = units > 0 ? (sale?.discounts ?? 0) / units : 0;
+          const marketplaceFeeUnit =
+            units > 0 ? (sale?.marketplaceFees ?? 0) / units : 0;
+          const shippingSellerUnit =
+            units > 0 ? (sale?.shippingCosts ?? 0) / units : 0;
+          const advertisingAmount = activeAdvertising
+            .filter((record) => record.sku === product.sku)
+            .reduce((total, record) => total + record.amount, 0);
+          const advertisingUnit = units > 0 ? advertisingAmount / units : 0;
+          const tacosRate =
+            averagePrice > 0 ? advertisingUnit / averagePrice : 0;
+          const totalCostUnit =
+            discountUnit +
+            productCostUnit +
+            packagingCostUnit +
+            inboundFreightUnit +
+            marketplaceFixedUnit +
+            otherCostUnit +
+            taxUnit +
+            marketplaceFeeUnit +
+            shippingSellerUnit +
+            advertisingUnit;
+          const hasSales = units > 0 && averagePrice > 0;
+          const contributionMarginUnit = hasSales
+            ? averagePrice - totalCostUnit
+            : 0;
+
+          return {
+            sku: product.sku,
+            title: product.title,
+            units,
+            orders,
+            averagePrice,
+            discountUnit,
+            productCostUnit,
+            packagingCostUnit,
+            inboundFreightUnit,
+            marketplaceFixedUnit,
+            otherCostUnit,
+            taxUnit,
+            marketplaceFeeUnit,
+            shippingSellerUnit,
+            advertisingUnit,
+            tacosRate,
+            totalCostUnit,
+            contributionMarginUnit,
+            contributionMarginRate:
+              averagePrice > 0 ? contributionMarginUnit / averagePrice : 0,
+            hasSales
+          };
+        })
+        .sort(
+          (current, next) =>
+            next.contributionMarginUnit - current.contributionMarginUnit
+        ),
+    [activeAdvertising, activeSales, costs, productOptions]
+  );
+
+  const filteredProductUnitRows = useMemo(() => {
+    const query = skuFilter.trim().toLowerCase();
+
+    return productUnitRows.filter(
+      (product) =>
+        !query ||
+        product.sku.toLowerCase().includes(query) ||
+        product.title.toLowerCase().includes(query)
+    );
+  }, [productUnitRows, skuFilter]);
+
+  const productUnitTotals = useMemo(
+    () =>
+      productUnitRows.reduce(
+        (totals, product) => ({
+          products: totals.products + 1,
+          productsWithSales: totals.productsWithSales + (product.hasSales ? 1 : 0),
+          units: totals.units + product.units,
+          grossRevenue: totals.grossRevenue + product.averagePrice * product.units,
+          totalCosts: totals.totalCosts + product.totalCostUnit * product.units,
+          contributionMargin:
+            totals.contributionMargin +
+            product.contributionMarginUnit * product.units
+        }),
+        {
+          products: 0,
+          productsWithSales: 0,
+          units: 0,
+          grossRevenue: 0,
+          totalCosts: 0,
+          contributionMargin: 0
+        }
+      ),
+    [productUnitRows]
+  );
 
   const costCenterProductRows = useMemo<CostCenterProductRow[]>(
     () =>
@@ -3135,6 +3299,215 @@ export function DashmarketDashboard() {
                   ))}
                 </div>
               )}
+            </section>
+          )}
+
+          {activeView === "produtos" && (
+            <section className="mt-5 grid gap-5">
+              <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+                <KpiCard
+                  detail={`${formatNumber.format(productUnitTotals.productsWithSales)} com vendas no periodo`}
+                  icon={PackageCheck}
+                  title="Produtos"
+                  value={formatNumber.format(productUnitTotals.products)}
+                />
+                <KpiCard
+                  detail={`${formatNumber.format(productUnitTotals.units)} unidades vendidas`}
+                  icon={CircleDollarSign}
+                  title="Preco medio unit."
+                  value={formatCurrency.format(
+                    productUnitTotals.units > 0
+                      ? productUnitTotals.grossRevenue / productUnitTotals.units
+                      : 0
+                  )}
+                />
+                <KpiCard
+                  detail="Custos e descontos por unidade"
+                  icon={WalletCards}
+                  title="Custo medio unit."
+                  tone="clay"
+                  value={formatCurrency.format(
+                    productUnitTotals.units > 0
+                      ? productUnitTotals.totalCosts / productUnitTotals.units
+                      : 0
+                  )}
+                />
+                <KpiCard
+                  detail={`${formatPercent(
+                    productUnitTotals.grossRevenue > 0
+                      ? productUnitTotals.contributionMargin /
+                          productUnitTotals.grossRevenue
+                      : 0
+                  )} sobre o preco medio`}
+                  icon={LineChart}
+                  title="MC media unit."
+                  tone="moss"
+                  value={formatCurrency.format(
+                    productUnitTotals.units > 0
+                      ? productUnitTotals.contributionMargin /
+                          productUnitTotals.units
+                      : 0
+                  )}
+                />
+                <KpiCard
+                  detail="Publicidade dividida pelas unidades"
+                  icon={Megaphone}
+                  title="ADS medio unit."
+                  tone="berry"
+                  value={formatCurrency.format(
+                    productUnitTotals.units > 0
+                      ? activeAdvertising.reduce(
+                          (total, record) => total + record.amount,
+                          0
+                        ) / productUnitTotals.units
+                      : 0
+                  )}
+                />
+              </section>
+
+              <section className="rounded-lg border border-black/10 bg-white shadow-sm">
+                <div className="flex flex-col gap-3 border-b border-black/10 p-4 lg:flex-row lg:items-center lg:justify-between">
+                  <div>
+                    <h2 className="text-lg font-bold">
+                      Produtos - margem unitária
+                    </h2>
+                    <p className="text-sm text-black/60">
+                      Custos detalhados por unidade, separados da margem total por vendas.
+                    </p>
+                  </div>
+                  <span className="inline-flex h-8 items-center gap-2 rounded-lg bg-emerald-50 px-3 text-sm font-semibold text-sea ring-1 ring-emerald-100">
+                    <PackageCheck aria-hidden className="h-4 w-4" />
+                    Analise por SKU e unidade
+                  </span>
+                </div>
+
+                <div className="table-scroll overflow-x-auto">
+                  <table className="min-w-[1840px] w-full text-left text-sm">
+                    <thead className="bg-black/[0.025] text-xs uppercase tracking-normal text-black/50">
+                      <tr>
+                        <th className="px-4 py-3">Produto</th>
+                        <th className="px-4 py-3">SKU</th>
+                        <th className="px-4 py-3">Vendas</th>
+                        <th className="px-4 py-3">Preco unit.</th>
+                        <th className="px-4 py-3 text-clay">Desconto</th>
+                        <th className="px-4 py-3 text-clay">Produto</th>
+                        <th className="px-4 py-3 text-clay">Embalagem</th>
+                        <th className="px-4 py-3 text-clay">Frete entrada</th>
+                        <th className="px-4 py-3 text-clay">Outros</th>
+                        <th className="px-4 py-3 text-berry">Imposto</th>
+                        <th className="px-4 py-3 text-clay">Tarifa ML</th>
+                        <th className="px-4 py-3 text-sky-700">Frete vendedor</th>
+                        <th className="px-4 py-3 text-berry">ADS/TACOS</th>
+                        <th className="px-4 py-3">Custo total unit.</th>
+                        <th className="px-4 py-3 text-sea">MC unit.</th>
+                        <th className="px-4 py-3 text-sea">MC %</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-black/10">
+                      {filteredProductUnitRows.map((product) => (
+                        <tr className="hover:bg-black/[0.018]" key={product.sku}>
+                          <td className="px-4 py-3">
+                            <p className="font-semibold text-ink">
+                              {product.title}
+                            </p>
+                          </td>
+                          <td className="px-4 py-3 font-bold">{product.sku}</td>
+                          <td className="px-4 py-3">
+                            {product.hasSales ? (
+                              <>
+                                <p>
+                                  {formatNumber.format(product.units)} un.
+                                </p>
+                                <p className="text-xs text-black/45">
+                                  {formatNumber.format(product.orders)} pedidos
+                                </p>
+                              </>
+                            ) : (
+                              <span className="text-black/45">Sem vendas</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 font-semibold">
+                            {product.hasSales
+                              ? formatCurrency.format(product.averagePrice)
+                              : "-"}
+                          </td>
+                          <td className="px-4 py-3 text-clay">
+                            {formatCurrency.format(product.discountUnit)}
+                          </td>
+                          <td className="px-4 py-3 text-clay">
+                            {formatCurrency.format(product.productCostUnit)}
+                          </td>
+                          <td className="px-4 py-3 text-clay">
+                            {formatCurrency.format(product.packagingCostUnit)}
+                          </td>
+                          <td className="px-4 py-3 text-clay">
+                            {formatCurrency.format(product.inboundFreightUnit)}
+                          </td>
+                          <td className="px-4 py-3 text-clay">
+                            {formatCurrency.format(
+                              product.otherCostUnit + product.marketplaceFixedUnit
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-berry">
+                            {formatCurrency.format(product.taxUnit)}
+                          </td>
+                          <td className="px-4 py-3 text-clay">
+                            {formatCurrency.format(product.marketplaceFeeUnit)}
+                          </td>
+                          <td className="px-4 py-3 text-sky-700">
+                            {formatCurrency.format(product.shippingSellerUnit)}
+                          </td>
+                          <td className="px-4 py-3 text-berry">
+                            {formatCurrency.format(product.advertisingUnit)}
+                            {product.tacosRate > 0 && (
+                              <p className="text-xs text-black/45">
+                                {formatPercent(product.tacosRate)} TACOS
+                              </p>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 font-semibold">
+                            {formatCurrency.format(product.totalCostUnit)}
+                          </td>
+                          <td
+                            className={`px-4 py-3 font-bold ${
+                              product.contributionMarginUnit >= 0
+                                ? "text-sea"
+                                : "text-berry"
+                            }`}
+                          >
+                            {product.hasSales
+                              ? formatCurrency.format(
+                                  product.contributionMarginUnit
+                                )
+                              : "-"}
+                          </td>
+                          <td
+                            className={`px-4 py-3 font-bold ${
+                              product.contributionMarginRate >= 0
+                                ? "text-sea"
+                                : "text-berry"
+                            }`}
+                          >
+                            {product.hasSales
+                              ? formatPercent(product.contributionMarginRate)
+                              : "-"}
+                          </td>
+                        </tr>
+                      ))}
+                      {filteredProductUnitRows.length === 0 && (
+                        <tr>
+                          <td
+                            className="px-4 py-8 text-center text-black/55"
+                            colSpan={16}
+                          >
+                            Nenhum produto encontrado.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
             </section>
           )}
 
