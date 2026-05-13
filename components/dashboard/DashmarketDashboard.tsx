@@ -31,7 +31,7 @@ import { getMarketplaceAdapter, listMarketplaceAdapters } from "@/lib/marketplac
 import type { MarketplaceProvider } from "@/lib/marketplaces/types";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 
-type ViewKey = "margem" | "custos" | "estoque" | "ads";
+type ViewKey = "margem" | "vendas" | "custos" | "estoque" | "ads";
 type SupabaseStatus = "checking" | "demo" | "connected" | "error";
 
 type Organization = {
@@ -127,13 +127,62 @@ type CostCenterRow = {
 };
 
 type OrderItemRow = {
+  id?: string;
+  external_item_id?: string | null;
   seller_sku: string | null;
   title: string;
   quantity: number | string;
+  unit_price?: number | string;
   gross_amount: number | string;
   marketplace_fee_amount: number | string;
   shipping_cost_amount: number | string;
   discount_amount: number | string;
+  orders?: OrderRelationRow | OrderRelationRow[] | null;
+  marketplace_listings?: ListingRelationRow | ListingRelationRow[] | null;
+};
+
+type OrderRelationRow = {
+  provider_order_id: string;
+  sold_at: string;
+  status: string;
+  gross_amount: number | string;
+  taxes_amount: number | string;
+  marketplace_accounts?: MarketplaceAccountNameRow | MarketplaceAccountNameRow[] | null;
+};
+
+type MarketplaceAccountNameRow = {
+  account_name: string;
+};
+
+type ListingRelationRow = {
+  fulfillment_type: string | null;
+};
+
+type SalesDetailSourceRow = {
+  id: string;
+  orderId: string;
+  externalItemId: string;
+  title: string;
+  accountName: string;
+  sku: string;
+  soldAt: string;
+  status: string;
+  fulfillment: string;
+  unitPrice: number;
+  quantity: number;
+  grossAmount: number;
+  marketplaceFee: number;
+  shippingBuyer: number;
+  shippingSeller: number;
+  discountAmount: number;
+  orderTaxAmount: number;
+};
+
+type SalesDetailRow = SalesDetailSourceRow & {
+  costAmount: number;
+  taxAmount: number;
+  contributionMargin: number;
+  marginRate: number;
 };
 
 type InventorySnapshotRow = {
@@ -381,6 +430,7 @@ const allocationLabel: Record<SkuCost["allocation"], string> = {
 
 const views: Array<{ key: ViewKey; label: string; icon: typeof BarChart3 }> = [
   { key: "margem", label: "Margem", icon: BarChart3 },
+  { key: "vendas", label: "Vendas", icon: ClipboardList },
   { key: "custos", label: "Centro de custos", icon: WalletCards },
   { key: "estoque", label: "Estoque Full", icon: Boxes },
   { key: "ads", label: "Publicidade", icon: Megaphone }
@@ -482,6 +532,27 @@ function getRelatedProduct(row: CostCenterRow) {
   return row.products;
 }
 
+function getRelatedOrder(row: OrderItemRow) {
+  if (Array.isArray(row.orders)) return row.orders[0] ?? null;
+  return row.orders ?? null;
+}
+
+function getRelatedAccount(row: OrderRelationRow | null) {
+  if (Array.isArray(row?.marketplace_accounts)) {
+    return row.marketplace_accounts[0] ?? null;
+  }
+
+  return row?.marketplace_accounts ?? null;
+}
+
+function getRelatedListing(row: OrderItemRow) {
+  if (Array.isArray(row.marketplace_listings)) {
+    return row.marketplace_listings[0] ?? null;
+  }
+
+  return row.marketplace_listings ?? null;
+}
+
 function mapCostCenterRow(row: CostCenterRow): SkuCost | null {
   const product = getRelatedProduct(row);
   if (!product) return null;
@@ -542,6 +613,49 @@ function promotionImpact(status: string | null) {
   return status ?? "Status aberto";
 }
 
+function dateOnly(value: Date) {
+  const localDate = new Date(value.getTime() - value.getTimezoneOffset() * 60000);
+  return localDate.toISOString().slice(0, 10);
+}
+
+function daysAgo(days: number) {
+  const value = new Date();
+  value.setDate(value.getDate() - days);
+  return dateOnly(value);
+}
+
+function calculateCostForDetail(cost: SkuCost, sale: SalesDetailSourceRow) {
+  if (cost.allocation === "percentage") {
+    return sale.grossAmount * (cost.amount / 100);
+  }
+
+  if (cost.allocation === "per_order") {
+    return cost.amount;
+  }
+
+  return sale.quantity * cost.amount;
+}
+
+function calculateDetailCostBreakdown(
+  sale: SalesDetailSourceRow,
+  costs: SkuCost[]
+) {
+  return costs
+    .filter((cost) => cost.sku === sale.sku)
+    .reduce(
+      (totals, cost) => {
+        const amount = calculateCostForDetail(cost, sale);
+
+        if (cost.category === "tax") {
+          return { ...totals, taxAmount: totals.taxAmount + amount };
+        }
+
+        return { ...totals, costAmount: totals.costAmount + amount };
+      },
+      { costAmount: 0, taxAmount: 0 }
+    );
+}
+
 async function readApiPayload<T>(response: Response) {
   const contentType = response.headers.get("content-type") ?? "";
 
@@ -588,6 +702,9 @@ export function DashmarketDashboard() {
     useState<SupabaseStatus>("checking");
   const [realProducts, setRealProducts] = useState<ProductRow[]>([]);
   const [realSales, setRealSales] = useState<SaleRecord[]>([]);
+  const [realSaleDetails, setRealSaleDetails] = useState<SalesDetailSourceRow[]>(
+    []
+  );
   const [realInventory, setRealInventory] = useState<InventoryDisplayRow[]>([]);
   const [realAdvertising, setRealAdvertising] =
     useState<AdvertisingSpend[]>([]);
@@ -620,7 +737,13 @@ export function DashmarketDashboard() {
     category: "product" as SkuCost["category"],
     amount: "",
     allocation: "per_unit" as SkuCost["allocation"],
+    taxPercent: "",
     validFrom: "2026-05-01"
+  });
+  const [salesFilters, setSalesFilters] = useState({
+    dateFrom: daysAgo(30),
+    dateTo: dateOnly(new Date()),
+    sku: ""
   });
 
   const activeSales = realSales.length > 0 ? realSales : salesSeed;
@@ -664,6 +787,111 @@ export function DashmarketDashboard() {
   const marginRows = useMemo(
     () => calculateContributionMargins(activeSales, costs, activeAdvertising),
     [activeAdvertising, activeSales, costs]
+  );
+  const salesDetailSources = useMemo(
+    () =>
+      realSaleDetails.length > 0
+        ? realSaleDetails
+        : salesSeed.map((sale, index) => ({
+            id: `demo-sale-${sale.sku}`,
+            orderId: `DEMO-${index + 1}`,
+            externalItemId: sale.sku,
+            title: sale.title,
+            accountName: organization?.name ?? "DASHMARKET",
+            sku: sale.sku,
+            soldAt: new Date().toISOString(),
+            status: "paid",
+            fulfillment: index === 3 ? "Flex" : "Full",
+            unitPrice: sale.units > 0 ? sale.grossRevenue / sale.units : 0,
+            quantity: sale.units,
+            grossAmount: sale.grossRevenue,
+            marketplaceFee: sale.marketplaceFees,
+            shippingBuyer: 0,
+            shippingSeller: sale.shippingCosts,
+            discountAmount: sale.discounts,
+            orderTaxAmount: sale.taxes
+          })),
+    [organization?.name, realSaleDetails]
+  );
+  const salesDetailRows = useMemo<SalesDetailRow[]>(
+    () =>
+      salesDetailSources
+        .map((sale) => {
+          const { costAmount, taxAmount } = calculateDetailCostBreakdown(
+            sale,
+            costs
+          );
+          const totalTaxAmount = sale.orderTaxAmount + taxAmount;
+          const contributionMargin =
+            sale.grossAmount -
+            sale.discountAmount -
+            sale.marketplaceFee -
+            sale.shippingSeller -
+            sale.shippingBuyer -
+            costAmount -
+            totalTaxAmount;
+
+          return {
+            ...sale,
+            costAmount,
+            taxAmount: totalTaxAmount,
+            contributionMargin,
+            marginRate:
+              sale.grossAmount > 0 ? contributionMargin / sale.grossAmount : 0
+          };
+        })
+        .sort(
+          (current, next) =>
+            new Date(next.soldAt).getTime() - new Date(current.soldAt).getTime()
+        ),
+    [costs, salesDetailSources]
+  );
+  const filteredSalesDetailRows = useMemo(() => {
+    const query = salesFilters.sku.trim().toLowerCase();
+
+    return salesDetailRows.filter((sale) => {
+      const soldDate = sale.soldAt.slice(0, 10);
+      const matchesDate =
+        (!salesFilters.dateFrom || soldDate >= salesFilters.dateFrom) &&
+        (!salesFilters.dateTo || soldDate <= salesFilters.dateTo);
+      const matchesSku =
+        !query ||
+        sale.sku.toLowerCase().includes(query) ||
+        sale.title.toLowerCase().includes(query) ||
+        sale.externalItemId.toLowerCase().includes(query) ||
+        sale.orderId.toLowerCase().includes(query);
+
+      return matchesDate && matchesSku;
+    });
+  }, [salesDetailRows, salesFilters]);
+  const salesDetailTotals = useMemo(
+    () =>
+      filteredSalesDetailRows.reduce(
+        (totals, sale) => ({
+          grossAmount: totals.grossAmount + sale.grossAmount,
+          costAmount: totals.costAmount + sale.costAmount,
+          taxAmount: totals.taxAmount + sale.taxAmount,
+          marketplaceFee: totals.marketplaceFee + sale.marketplaceFee,
+          shippingBuyer: totals.shippingBuyer + sale.shippingBuyer,
+          shippingSeller: totals.shippingSeller + sale.shippingSeller,
+          contributionMargin:
+            totals.contributionMargin + sale.contributionMargin,
+          quantity: totals.quantity + sale.quantity,
+          orders: totals.orders + 1
+        }),
+        {
+          grossAmount: 0,
+          costAmount: 0,
+          taxAmount: 0,
+          marketplaceFee: 0,
+          shippingBuyer: 0,
+          shippingSeller: 0,
+          contributionMargin: 0,
+          quantity: 0,
+          orders: 0
+        }
+      ),
+    [filteredSalesDetailRows]
   );
 
   const filteredMargins = marginRows.filter((row) => {
@@ -740,7 +968,7 @@ export function DashmarketDashboard() {
     const { data, error } = await supabaseClient
       .from("order_items")
       .select(
-        "seller_sku, title, quantity, gross_amount, marketplace_fee_amount, shipping_cost_amount, discount_amount"
+        "id, external_item_id, seller_sku, title, quantity, unit_price, gross_amount, marketplace_fee_amount, shipping_cost_amount, discount_amount, orders(provider_order_id, sold_at, status, gross_amount, taxes_amount, marketplace_accounts(account_name)), marketplace_listings(fulfillment_type)"
       )
       .eq("organization_id", organizationId)
       .limit(2000);
@@ -748,9 +976,18 @@ export function DashmarketDashboard() {
     if (error) throw error;
 
     const salesBySku = new Map<string, SaleRecord>();
+    const detailRows: SalesDetailSourceRow[] = [];
 
     for (const row of (data ?? []) as OrderItemRow[]) {
       const sku = row.seller_sku ?? "SKU sem codigo";
+      const order = getRelatedOrder(row);
+      const account = getRelatedAccount(order);
+      const listing = getRelatedListing(row);
+      const grossAmount = numberFromDb(row.gross_amount);
+      const orderGrossAmount = numberFromDb(order?.gross_amount);
+      const orderTaxAmount = numberFromDb(order?.taxes_amount);
+      const allocatedTaxAmount =
+        orderGrossAmount > 0 ? orderTaxAmount * (grossAmount / orderGrossAmount) : 0;
       const current =
         salesBySku.get(sku) ??
         ({
@@ -767,14 +1004,36 @@ export function DashmarketDashboard() {
 
       current.units += numberFromDb(row.quantity);
       current.orders += 1;
-      current.grossRevenue += numberFromDb(row.gross_amount);
+      current.grossRevenue += grossAmount;
       current.marketplaceFees += numberFromDb(row.marketplace_fee_amount);
       current.shippingCosts += numberFromDb(row.shipping_cost_amount);
       current.discounts += numberFromDb(row.discount_amount);
+      current.taxes += allocatedTaxAmount;
       salesBySku.set(sku, current);
+
+      detailRows.push({
+        id: row.id ?? `${order?.provider_order_id ?? "order"}-${sku}`,
+        orderId: order?.provider_order_id ?? "Pedido sem codigo",
+        externalItemId: row.external_item_id ?? sku,
+        title: row.title,
+        accountName: account?.account_name ?? "Mercado Livre",
+        sku,
+        soldAt: order?.sold_at ?? new Date().toISOString(),
+        status: order?.status ?? "paid",
+        fulfillment: channelLabel(listing?.fulfillment_type ?? "marketplace"),
+        unitPrice: numberFromDb(row.unit_price),
+        quantity: numberFromDb(row.quantity),
+        grossAmount,
+        marketplaceFee: numberFromDb(row.marketplace_fee_amount),
+        shippingBuyer: 0,
+        shippingSeller: numberFromDb(row.shipping_cost_amount),
+        discountAmount: numberFromDb(row.discount_amount),
+        orderTaxAmount: allocatedTaxAmount
+      });
     }
 
     setRealSales(Array.from(salesBySku.values()));
+    setRealSaleDetails(detailRows);
   }, [supabaseClient]);
 
   const loadInventory = useCallback(async (organizationId: string) => {
@@ -921,6 +1180,7 @@ export function DashmarketDashboard() {
       if (!supabaseClient) {
         setSupabaseStatus("demo");
         setRealSales([]);
+        setRealSaleDetails([]);
         setRealInventory([]);
         setRealAdvertising([]);
         setRealPromotions([]);
@@ -942,6 +1202,7 @@ export function DashmarketDashboard() {
           setOrganization(null);
           setRealProducts([]);
           setRealSales([]);
+          setRealSaleDetails([]);
           setRealInventory([]);
           setRealAdvertising([]);
           setRealPromotions([]);
@@ -977,6 +1238,7 @@ export function DashmarketDashboard() {
         } else {
           setCosts([]);
           setRealSales([]);
+          setRealSaleDetails([]);
           setRealInventory([]);
           setRealAdvertising([]);
           setRealPromotions([]);
@@ -987,6 +1249,7 @@ export function DashmarketDashboard() {
         if (!isMounted) return;
         setSupabaseStatus("error");
         setRealSales([]);
+        setRealSaleDetails([]);
         setRealInventory([]);
         setRealAdvertising([]);
         setRealPromotions([]);
@@ -1017,7 +1280,13 @@ export function DashmarketDashboard() {
   async function addCost(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (!costForm.label.trim() || !costForm.amount) return;
+    const costLabel =
+      costForm.label.trim() ||
+      (costForm.category === "tax" && costForm.allocation === "percentage"
+        ? "Imposto"
+        : "");
+
+    if (!costLabel || !costForm.amount) return;
 
     if (supabaseClient && organization) {
       setIsSavingCost(true);
@@ -1048,7 +1317,7 @@ export function DashmarketDashboard() {
         const { error: costError } = await supabaseClient.from("sku_costs").insert({
           organization_id: organization.id,
           product_id: product.id,
-          cost_name: costForm.label.trim(),
+          cost_name: costLabel,
           cost_category: costForm.category,
           allocation_method: costForm.allocation,
           amount: Number(costForm.amount),
@@ -1058,7 +1327,12 @@ export function DashmarketDashboard() {
         if (costError) throw costError;
 
         await loadCostCenter(organization.id);
-        setCostForm((current) => ({ ...current, label: "", amount: "" }));
+        setCostForm((current) => ({
+          ...current,
+          label: "",
+          amount: "",
+          taxPercent: ""
+        }));
         setDataMessage("Custo salvo no Supabase.");
       } catch (error) {
         setDataMessage(
@@ -1081,7 +1355,7 @@ export function DashmarketDashboard() {
             ? crypto.randomUUID()
             : `cost-${Date.now()}`,
         sku: costForm.sku,
-        label: costForm.label.trim(),
+        label: costLabel,
         category: costForm.category,
         amount: Number(costForm.amount),
         allocation: costForm.allocation,
@@ -1089,7 +1363,12 @@ export function DashmarketDashboard() {
       }
     ]);
 
-    setCostForm((current) => ({ ...current, label: "", amount: "" }));
+    setCostForm((current) => ({
+      ...current,
+      label: "",
+      amount: "",
+      taxPercent: ""
+    }));
   }
 
   async function signOut() {
@@ -1100,6 +1379,7 @@ export function DashmarketDashboard() {
     setOrganization(null);
     setRealProducts([]);
     setRealSales([]);
+    setRealSaleDetails([]);
     setRealInventory([]);
     setRealAdvertising([]);
     setRealPromotions([]);
@@ -1910,6 +2190,233 @@ export function DashmarketDashboard() {
             </section>
           )}
 
+          {activeView === "vendas" && (
+            <section className="mt-5 grid gap-5">
+              <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+                <KpiCard
+                  detail={`${formatNumber.format(salesDetailTotals.orders)} vendas aprovadas`}
+                  icon={CircleDollarSign}
+                  title="Faturamento ML"
+                  value={formatCurrency.format(salesDetailTotals.grossAmount)}
+                />
+                <KpiCard
+                  detail={`Custo ${formatCurrency.format(salesDetailTotals.costAmount)} | Imposto ${formatCurrency.format(salesDetailTotals.taxAmount)}`}
+                  icon={WalletCards}
+                  title="Custo e imposto"
+                  tone="clay"
+                  value={formatCurrency.format(
+                    salesDetailTotals.costAmount + salesDetailTotals.taxAmount
+                  )}
+                />
+                <KpiCard
+                  detail="Tarifas de venda do marketplace"
+                  icon={Percent}
+                  title="Tarifa de venda"
+                  tone="berry"
+                  value={formatCurrency.format(salesDetailTotals.marketplaceFee)}
+                />
+                <KpiCard
+                  detail={`Comprador ${formatCurrency.format(salesDetailTotals.shippingBuyer)} | Vendedor ${formatCurrency.format(salesDetailTotals.shippingSeller)}`}
+                  icon={Boxes}
+                  title="Frete total"
+                  value={formatCurrency.format(
+                    salesDetailTotals.shippingBuyer +
+                      salesDetailTotals.shippingSeller
+                  )}
+                />
+                <KpiCard
+                  detail={`${formatPercent(
+                    salesDetailTotals.grossAmount > 0
+                      ? salesDetailTotals.contributionMargin /
+                          salesDetailTotals.grossAmount
+                      : 0
+                  )} sobre o faturamento`}
+                  icon={PackageCheck}
+                  title="Margem contribuicao"
+                  tone="moss"
+                  value={formatCurrency.format(
+                    salesDetailTotals.contributionMargin
+                  )}
+                />
+              </section>
+
+              <section className="rounded-lg border border-black/10 bg-white p-4 shadow-sm">
+                <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
+                  <div>
+                    <h2 className="text-lg font-bold">Filtrar vendas</h2>
+                    <p className="text-sm text-black/60">
+                      Consulte por periodo, SKU, titulo, pedido ou MLB.
+                    </p>
+                  </div>
+                  {mercadoLivreAccount && (
+                    <button
+                      className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-ink px-4 text-sm font-bold text-white hover:bg-black"
+                      disabled={
+                        supabaseStatus !== "connected" || isSyncingMarketplace
+                      }
+                      onClick={syncMercadoLivreOrders}
+                      type="button"
+                    >
+                      <RefreshCw aria-hidden className="h-4 w-4" />
+                      {isSyncingOrders ? "Sincronizando" : "Sincronizar Vendas"}
+                    </button>
+                  )}
+                </div>
+
+                <div className="mt-4 grid gap-3 md:grid-cols-3">
+                  <label className="grid gap-1 text-sm font-semibold">
+                    Data inicio
+                    <input
+                      className="h-10 rounded-lg border border-black/10 bg-paper px-3 font-normal outline-none focus:ring-4 focus:ring-sea/20"
+                      onChange={(event) =>
+                        setSalesFilters((current) => ({
+                          ...current,
+                          dateFrom: event.target.value
+                        }))
+                      }
+                      type="date"
+                      value={salesFilters.dateFrom}
+                    />
+                  </label>
+                  <label className="grid gap-1 text-sm font-semibold">
+                    Data fim
+                    <input
+                      className="h-10 rounded-lg border border-black/10 bg-paper px-3 font-normal outline-none focus:ring-4 focus:ring-sea/20"
+                      onChange={(event) =>
+                        setSalesFilters((current) => ({
+                          ...current,
+                          dateTo: event.target.value
+                        }))
+                      }
+                      type="date"
+                      value={salesFilters.dateTo}
+                    />
+                  </label>
+                  <label className="grid gap-1 text-sm font-semibold">
+                    SKU, titulo ou pedido
+                    <span className="relative">
+                      <Search
+                        aria-hidden
+                        className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-black/40"
+                      />
+                      <input
+                        className="h-10 w-full rounded-lg border border-black/10 bg-paper pl-9 pr-3 font-normal outline-none focus:ring-4 focus:ring-sea/20"
+                        onChange={(event) =>
+                          setSalesFilters((current) => ({
+                            ...current,
+                            sku: event.target.value
+                          }))
+                        }
+                        placeholder="Buscar SKU, titulo, MLB ou pedido"
+                        value={salesFilters.sku}
+                      />
+                    </span>
+                  </label>
+                </div>
+              </section>
+
+              <section className="rounded-lg border border-black/10 bg-white shadow-sm">
+                <div className="border-b border-black/10 p-4">
+                  <h2 className="text-lg font-bold">Vendas detalhadas</h2>
+                  <p className="text-sm text-black/60">
+                    Custos e impostos sao calculados com base no Centro de Custos.
+                  </p>
+                </div>
+                <div className="table-scroll overflow-x-auto">
+                  <table className="min-w-[1540px] w-full text-left text-sm">
+                    <thead className="bg-black/[0.025] text-xs uppercase tracking-normal text-black/50">
+                      <tr>
+                        <th className="px-4 py-3">Anuncio</th>
+                        <th className="px-4 py-3">Conta</th>
+                        <th className="px-4 py-3">SKU</th>
+                        <th className="px-4 py-3">Data</th>
+                        <th className="px-4 py-3">Frete</th>
+                        <th className="px-4 py-3">Valor unit.</th>
+                        <th className="px-4 py-3">Qtd.</th>
+                        <th className="px-4 py-3">Faturamento ML</th>
+                        <th className="px-4 py-3 text-clay">Custo (-)</th>
+                        <th className="px-4 py-3 text-berry">Imposto (-)</th>
+                        <th className="px-4 py-3 text-clay">Tarifa venda (-)</th>
+                        <th className="px-4 py-3">Frete comprador (-)</th>
+                        <th className="px-4 py-3 text-sky-700">Frete vendedor (-)</th>
+                        <th className="px-4 py-3 text-sea">Margem contrib.</th>
+                        <th className="px-4 py-3 text-sea">MC em %</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-black/10">
+                      {filteredSalesDetailRows.map((sale) => (
+                        <tr className="hover:bg-black/[0.018]" key={sale.id}>
+                          <td className="px-4 py-3">
+                            <p className="font-semibold text-ink">{sale.title}</p>
+                            <p className="text-xs text-black/45">
+                              {sale.externalItemId} | Pedido {sale.orderId}
+                            </p>
+                          </td>
+                          <td className="px-4 py-3">{sale.accountName}</td>
+                          <td className="px-4 py-3 font-bold">{sale.sku}</td>
+                          <td className="px-4 py-3">
+                            {new Date(sale.soldAt).toLocaleDateString("pt-BR")}
+                          </td>
+                          <td className="px-4 py-3">{sale.fulfillment}</td>
+                          <td className="px-4 py-3">
+                            {formatCurrency.format(sale.unitPrice)}
+                          </td>
+                          <td className="px-4 py-3">
+                            {formatNumber.format(sale.quantity)}
+                          </td>
+                          <td className="px-4 py-3 font-semibold">
+                            {formatCurrency.format(sale.grossAmount)}
+                          </td>
+                          <td className="px-4 py-3 text-clay">
+                            {formatCurrency.format(sale.costAmount)}
+                          </td>
+                          <td className="px-4 py-3 text-berry">
+                            {formatCurrency.format(sale.taxAmount)}
+                          </td>
+                          <td className="px-4 py-3 text-clay">
+                            {formatCurrency.format(sale.marketplaceFee)}
+                          </td>
+                          <td className="px-4 py-3 text-black/50">
+                            {formatCurrency.format(sale.shippingBuyer)}
+                          </td>
+                          <td className="px-4 py-3 text-sky-700">
+                            {formatCurrency.format(sale.shippingSeller)}
+                          </td>
+                          <td
+                            className={`px-4 py-3 font-bold ${
+                              sale.contributionMargin >= 0
+                                ? "text-sea"
+                                : "text-berry"
+                            }`}
+                          >
+                            {formatCurrency.format(sale.contributionMargin)}
+                          </td>
+                          <td
+                            className={`px-4 py-3 font-bold ${
+                              sale.marginRate >= 0 ? "text-sea" : "text-berry"
+                            }`}
+                          >
+                            {formatPercent(sale.marginRate)}
+                          </td>
+                        </tr>
+                      ))}
+                      {filteredSalesDetailRows.length === 0 && (
+                        <tr>
+                          <td
+                            className="px-4 py-8 text-center text-black/55"
+                            colSpan={15}
+                          >
+                            Nenhuma venda encontrada para este filtro.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            </section>
+          )}
+
           {activeView === "margem" && (
             <section className="mt-5 rounded-lg border border-black/10 bg-white shadow-sm">
               <div className="flex flex-col gap-2 border-b border-black/10 p-4 sm:flex-row sm:items-center sm:justify-between">
@@ -2036,7 +2543,19 @@ export function DashmarketDashboard() {
                         onChange={(event) =>
                           setCostForm((current) => ({
                             ...current,
-                            category: event.target.value as SkuCost["category"]
+                            category: event.target.value as SkuCost["category"],
+                            allocation:
+                              event.target.value === "tax"
+                                ? "percentage"
+                                : current.allocation,
+                            label:
+                              event.target.value === "tax" && !current.label
+                                ? "Imposto"
+                                : current.label,
+                            taxPercent:
+                              event.target.value === "tax"
+                                ? current.amount
+                                : current.taxPercent
                           }))
                         }
                         value={costForm.category}
@@ -2056,7 +2575,12 @@ export function DashmarketDashboard() {
                         onChange={(event) =>
                           setCostForm((current) => ({
                             ...current,
-                            allocation: event.target.value as SkuCost["allocation"]
+                            allocation: event.target.value as SkuCost["allocation"],
+                            taxPercent:
+                              current.category === "tax" &&
+                              event.target.value === "percentage"
+                                ? current.amount
+                                : current.taxPercent
                           }))
                         }
                         value={costForm.allocation}
@@ -2072,17 +2596,30 @@ export function DashmarketDashboard() {
 
                   <div className="grid grid-cols-2 gap-3">
                     <label className="grid gap-1 text-sm font-semibold">
-                      Valor
+                      {costForm.category === "tax" &&
+                      costForm.allocation === "percentage"
+                        ? "Imposto (%)"
+                        : "Valor"}
                       <input
                         className="h-10 rounded-lg border border-black/10 bg-paper px-3 font-normal outline-none focus:ring-4 focus:ring-sea/20"
                         min="0"
                         onChange={(event) =>
                           setCostForm((current) => ({
                             ...current,
-                            amount: event.target.value
+                            amount: event.target.value,
+                            taxPercent:
+                              current.category === "tax" &&
+                              current.allocation === "percentage"
+                                ? event.target.value
+                                : current.taxPercent
                           }))
                         }
-                        placeholder="0,00"
+                        placeholder={
+                          costForm.category === "tax" &&
+                          costForm.allocation === "percentage"
+                            ? "12,00"
+                            : "0,00"
+                        }
                         step="0.01"
                         type="number"
                         value={costForm.amount}
@@ -2103,6 +2640,32 @@ export function DashmarketDashboard() {
                       />
                     </label>
                   </div>
+
+                  <label className="grid gap-1 rounded-lg bg-amber-50 p-3 text-sm font-semibold text-ink ring-1 ring-amber-100">
+                    Imposto (%) do SKU
+                    <input
+                      className="h-10 rounded-lg border border-amber-200 bg-white px-3 font-normal outline-none focus:ring-4 focus:ring-amber-200"
+                      min="0"
+                      onChange={(event) =>
+                        setCostForm((current) => ({
+                          ...current,
+                          category: "tax",
+                          allocation: "percentage",
+                          label: current.label || "Imposto",
+                          amount: event.target.value,
+                          taxPercent: event.target.value
+                        }))
+                      }
+                      placeholder="Ex.: 12,00"
+                      step="0.01"
+                      type="number"
+                      value={costForm.taxPercent}
+                    />
+                    <span className="text-xs font-normal text-black/55">
+                      Ao preencher este campo, o custo sera salvo como Tributo
+                      percentual e entrara na coluna Imposto das vendas.
+                    </span>
+                  </label>
 
                   <button
                     className="mt-1 inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-ink px-4 text-sm font-bold text-white hover:bg-black"
