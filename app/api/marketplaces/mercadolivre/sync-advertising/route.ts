@@ -209,6 +209,28 @@ function mercadoAdsHint(error: MercadoAdsApiError) {
   return "Confira os detalhes retornados pelo Mercado Ads e tente novamente apos o deploy mais recente.";
 }
 
+function unknownErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error) return error.message;
+
+  if (error && typeof error === "object") {
+    const payload = error as {
+      code?: string;
+      details?: string;
+      error?: string;
+      hint?: string;
+      message?: string;
+    };
+    const message = payload.message ?? payload.error ?? fallback;
+    const extras = [payload.code, payload.details, payload.hint]
+      .filter(Boolean)
+      .join(" ");
+
+    return extras ? `${message} ${extras}` : message;
+  }
+
+  return fallback;
+}
+
 async function refreshAccessToken(
   credentials: MarketplaceCredentials,
   accountId: string,
@@ -764,13 +786,17 @@ export async function POST(request: Request) {
         syncedAt: now
       });
     } catch (error) {
+      const errorMessage = unknownErrorMessage(
+        error,
+        "Falha ao sincronizar publicidade."
+      );
+
       await supabase
         .from("sync_runs")
         .update({
           status: "failed",
           finished_at: new Date().toISOString(),
-          error_message:
-            error instanceof Error ? error.message : "Falha ao sincronizar publicidade."
+          error_message: errorMessage
         })
         .eq("id", syncRun.id);
 
@@ -790,12 +816,19 @@ export async function POST(request: Request) {
       );
     }
 
+    const errorMessage = unknownErrorMessage(
+      error,
+      "Nao foi possivel sincronizar publicidade."
+    );
+
     return NextResponse.json(
       {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Nao foi possivel sincronizar publicidade."
+        error: errorMessage,
+        details:
+          errorMessage === "Nao foi possivel sincronizar publicidade."
+            ? "A rota recebeu uma falha sem mensagem estruturada."
+            : undefined,
+        hint: "Se esta mensagem continuar generica, confira se o ultimo commit foi publicado na Vercel."
       },
       { status: 500 }
     );
