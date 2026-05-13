@@ -288,6 +288,7 @@ type CostCalculatorFormState = {
   storageCost: string;
   operationalCost: string;
   taxPercentage: string;
+  adTacosPercentage: string;
   promotionCredit: string;
   desiredProfitMargin: string;
   desiredFixedProfit: string;
@@ -305,6 +306,7 @@ type CostCalculatorResult = {
   storageCost: number;
   operationalCost: number;
   taxes: number;
+  advertisingInvestment: number;
   promotionCredit: number;
   totalCosts: number;
   netProfit: number;
@@ -811,6 +813,7 @@ function calculateCostsFromCalculator(
   const storageCost = numberFromInput(form.storageCost);
   const operationalCost = numberFromInput(form.operationalCost);
   const taxPercentage = numberFromInput(form.taxPercentage);
+  const adTacosPercentage = numberFromInput(form.adTacosPercentage);
   const promotionCredit = numberFromInput(form.promotionCredit);
   const fixedCosts =
     productCost +
@@ -825,7 +828,10 @@ function calculateCostsFromCalculator(
   if (mode === "price") {
     const desiredProfitMargin = numberFromInput(form.desiredProfitMargin);
     const variablePercentage =
-      desiredProfitMargin + commissionPercentage + taxPercentage;
+      desiredProfitMargin +
+      commissionPercentage +
+      taxPercentage +
+      adTacosPercentage;
 
     if (desiredProfitMargin <= 0 || variablePercentage >= 100) return null;
     sellingPrice = fixedCosts / (1 - variablePercentage / 100);
@@ -833,7 +839,8 @@ function calculateCostsFromCalculator(
 
   if (mode === "fixedProfit") {
     const desiredFixedProfit = numberFromInput(form.desiredFixedProfit);
-    const variablePercentage = commissionPercentage + taxPercentage;
+    const variablePercentage =
+      commissionPercentage + taxPercentage + adTacosPercentage;
 
     if (desiredFixedProfit <= 0 || variablePercentage >= 100) return null;
     sellingPrice = (fixedCosts + desiredFixedProfit) / (1 - variablePercentage / 100);
@@ -843,6 +850,7 @@ function calculateCostsFromCalculator(
 
   const commission = sellingPrice * (commissionPercentage / 100);
   const taxes = sellingPrice * (taxPercentage / 100);
+  const advertisingInvestment = sellingPrice * (adTacosPercentage / 100);
   const totalCosts =
     productCost +
     commission +
@@ -852,6 +860,7 @@ function calculateCostsFromCalculator(
     collectionCost +
     storageCost +
     operationalCost +
+    advertisingInvestment +
     taxes;
   const netProfit = sellingPrice - totalCosts + promotionCredit;
   const profitMargin = sellingPrice > 0 ? netProfit / sellingPrice : 0;
@@ -867,6 +876,7 @@ function calculateCostsFromCalculator(
     storageCost,
     operationalCost,
     taxes,
+    advertisingInvestment,
     promotionCredit,
     totalCosts,
     netProfit,
@@ -1051,6 +1061,7 @@ export function DashmarketDashboard() {
     storageCost: "",
     operationalCost: "",
     taxPercentage: "",
+    adTacosPercentage: "",
     promotionCredit: "",
     desiredProfitMargin: "15",
     desiredFixedProfit: "",
@@ -1947,6 +1958,13 @@ export function DashmarketDashboard() {
         ? (activeSales.find((sale) => sale.sku === product.sku)?.marketplaceFees ??
             0) / product.grossRevenue
         : 0;
+    const productAdvertisingAmount = activeAdvertising
+      .filter((record) => record.sku === product.sku)
+      .reduce((total, record) => total + record.amount, 0);
+    const adTacosPercentage =
+      product.grossRevenue > 0
+        ? (productAdvertisingAmount / product.grossRevenue) * 100
+        : 0;
 
     setCostForm((current) => ({ ...current, sku: product.sku }));
     setCalculatorForm((current) => ({
@@ -1973,7 +1991,11 @@ export function DashmarketDashboard() {
       collectionCost: inputNumber(collectionCost),
       storageCost: inputNumber(storageCost),
       operationalCost: inputNumber(operationalCost),
-      taxPercentage: inputNumber(product.taxPercentage)
+      taxPercentage: inputNumber(product.taxPercentage),
+      adTacosPercentage:
+        adTacosPercentage > 0
+          ? adTacosPercentage.toFixed(2)
+          : current.adTacosPercentage
     }));
   }
 
@@ -3981,6 +4003,7 @@ export function DashmarketDashboard() {
                         ["storageCost", "Armazenagem", "0,00"],
                         ["operationalCost", "Operacional", "0,00"],
                         ["taxPercentage", "Imposto (%)", "0,00"],
+                        ["adTacosPercentage", "Investimento ADS - TACOS (%)", "8,00"],
                         ["promotionCredit", "Credito promocao", "0,00"],
                         ["validFrom", "Vigencia", ""]
                       ].map(([field, label, placeholder]) => (
@@ -4064,6 +4087,10 @@ export function DashmarketDashboard() {
                           ["Armazenagem", -calculatorResult.storageCost],
                           ["Operacional", -calculatorResult.operationalCost],
                           ["Impostos", -calculatorResult.taxes],
+                          [
+                            "Investimento ADS - TACOS",
+                            -calculatorResult.advertisingInvestment
+                          ],
                           ["Credito promocao", calculatorResult.promotionCredit]
                         ]
                           .filter(([, value]) => Number(value) !== 0)
@@ -4121,7 +4148,7 @@ export function DashmarketDashboard() {
                         : "Aplicar custos internos"}
                     </button>
                     <p className="mt-2 text-xs text-black/55">
-                      Comissao, tarifa e frete ficam como simulacao; o Mercado Livre ja traz esses valores nas vendas.
+                      Comissao, tarifa, frete e ADS/TACOS ficam como simulacao; o Mercado Livre ja traz esses valores nas vendas.
                     </p>
                   </section>
                 </div>
