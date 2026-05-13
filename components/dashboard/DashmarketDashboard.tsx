@@ -13,11 +13,14 @@ import {
   Megaphone,
   PackageCheck,
   PackagePlus,
+  Pencil,
   Percent,
   RefreshCw,
+  Save,
   Search,
   ShieldCheck,
   Tags,
+  Trash2,
   WalletCards
 } from "lucide-react";
 import {
@@ -40,10 +43,13 @@ type Organization = {
   slug: string;
 };
 
+type ProductStatus = "active" | "paused" | "archived";
+
 type ProductRow = {
   id: string;
   internal_sku: string;
   title: string;
+  status: ProductStatus;
 };
 
 type MarketplaceAccountRow = {
@@ -613,7 +619,7 @@ function getOrderItemShippingAmounts(row: OrderItemRow) {
 
 function mapCostCenterRow(row: CostCenterRow): SkuCost | null {
   const product = getRelatedProduct(row);
-  if (!product) return null;
+  if (!product || product.status === "archived") return null;
 
   return {
     id: row.id,
@@ -943,6 +949,7 @@ export function DashmarketDashboard() {
     taxPercent: "",
     validFrom: "2026-05-01"
   });
+  const [editingCostId, setEditingCostId] = useState<string | null>(null);
   const [calculatorMode, setCalculatorMode] =
     useState<CostCalculatorMode>("margin");
   const [calculatorForm, setCalculatorForm] = useState<CostCalculatorFormState>({
@@ -964,6 +971,15 @@ export function DashmarketDashboard() {
     validFrom: dateOnly(new Date())
   });
   const [costProductSearch, setCostProductSearch] = useState("");
+  const [editingProductSku, setEditingProductSku] = useState<string | null>(
+    null
+  );
+  const [productEditForm, setProductEditForm] = useState({
+    sku: "",
+    title: ""
+  });
+  const [hiddenSkus, setHiddenSkus] = useState<string[]>([]);
+  const [isSavingProduct, setIsSavingProduct] = useState(false);
   const [isSavingCalculatorCosts, setIsSavingCalculatorCosts] = useState(false);
   const [salesFilters, setSalesFilters] = useState({
     dateFrom: daysAgo(30),
@@ -979,14 +995,18 @@ export function DashmarketDashboard() {
   const displayPromotionRows =
     realPromotions.length > 0 ? realPromotions : promotionRows;
   const productOptions = useMemo(
-    () =>
-      realProducts.length > 0
-        ? realProducts.map((product) => ({
-            sku: product.internal_sku,
-            title: product.title
-          }))
-        : activeSales.map((sale) => ({ sku: sale.sku, title: sale.title })),
-    [activeSales, realProducts]
+    () => {
+      const options =
+        realProducts.length > 0
+          ? realProducts.map((product) => ({
+              sku: product.internal_sku,
+              title: product.title
+            }))
+          : activeSales.map((sale) => ({ sku: sale.sku, title: sale.title }));
+
+      return options.filter((product) => !hiddenSkus.includes(product.sku));
+    },
+    [activeSales, hiddenSkus, realProducts]
   );
 
   useEffect(() => {
@@ -1240,8 +1260,9 @@ export function DashmarketDashboard() {
 
     const { data: productsData, error: productsError } = await supabaseClient
       .from("products")
-      .select("id, internal_sku, title")
+      .select("id, internal_sku, title, status")
       .eq("organization_id", organizationId)
+      .neq("status", "archived")
       .order("internal_sku", { ascending: true });
 
     if (productsError) throw productsError;
@@ -1252,7 +1273,7 @@ export function DashmarketDashboard() {
     const { data: costsData, error: costsError } = await supabaseClient
       .from("sku_costs")
       .select(
-        "id, cost_name, cost_category, allocation_method, amount, valid_from, valid_to, products(id, internal_sku, title)"
+        "id, cost_name, cost_category, allocation_method, amount, valid_from, valid_to, products(id, internal_sku, title, status)"
       )
       .eq("organization_id", organizationId)
       .order("valid_from", { ascending: false });
@@ -1382,7 +1403,7 @@ export function DashmarketDashboard() {
     const { data, error } = await supabaseClient
       .from("advertising_metrics")
       .select(
-        "impressions, clicks, ad_spend_amount, attributed_revenue_amount, attributed_orders, products(id, internal_sku, title)"
+        "impressions, clicks, ad_spend_amount, attributed_revenue_amount, attributed_orders, products(id, internal_sku, title, status)"
       )
       .eq("organization_id", organizationId)
       .limit(2000);
@@ -1422,7 +1443,7 @@ export function DashmarketDashboard() {
     const { data, error } = await supabaseClient
       .from("promotions")
       .select(
-        "provider_promotion_id, name, promotion_type, status, starts_at, ends_at, discount_amount, discount_percent, products(id, internal_sku, title)"
+        "provider_promotion_id, name, promotion_type, status, starts_at, ends_at, discount_amount, discount_percent, products(id, internal_sku, title, status)"
       )
       .eq("organization_id", organizationId)
       .order("starts_at", { ascending: false, nullsFirst: false })
@@ -1486,6 +1507,7 @@ export function DashmarketDashboard() {
         setRealAdvertising([]);
         setRealPromotions([]);
         setCosts(costsSeed);
+        setHiddenSkus([]);
         return;
       }
 
@@ -1508,6 +1530,7 @@ export function DashmarketDashboard() {
           setRealAdvertising([]);
           setRealPromotions([]);
           setCosts(costsSeed);
+          setHiddenSkus([]);
           return;
         }
 
@@ -1555,6 +1578,7 @@ export function DashmarketDashboard() {
         setRealAdvertising([]);
         setRealPromotions([]);
         setCosts(costsSeed);
+        setHiddenSkus([]);
         setDataMessage(
           error instanceof Error
             ? error.message
@@ -1578,6 +1602,69 @@ export function DashmarketDashboard() {
     supabaseClient
   ]);
 
+  function resetCostFormFields() {
+    setCostForm((current) => ({
+      ...current,
+      label: "",
+      amount: "",
+      taxPercent: ""
+    }));
+    setEditingCostId(null);
+  }
+
+  async function ensureProductForSku(sku: string, title: string) {
+    if (!supabaseClient || !organization) {
+      throw new Error("Entre no DASHMARKET antes de salvar SKUs.");
+    }
+
+    const localProduct = realProducts.find(
+      (currentProduct) => currentProduct.internal_sku === sku
+    );
+
+    if (localProduct) return localProduct;
+
+    const { data: existingProduct, error: existingProductError } =
+      await supabaseClient
+        .from("products")
+        .select("id, internal_sku, title, status")
+        .eq("organization_id", organization.id)
+        .eq("internal_sku", sku)
+        .maybeSingle();
+
+    if (existingProductError) throw existingProductError;
+
+    if (existingProduct) {
+      const product = existingProduct as ProductRow;
+
+      if (product.status !== "archived") return product;
+
+      const { data: restoredProduct, error: restoredProductError } =
+        await supabaseClient
+          .from("products")
+          .update({ status: "active", title: title || product.title || sku })
+          .eq("id", product.id)
+          .select("id, internal_sku, title, status")
+          .single();
+
+      if (restoredProductError) throw restoredProductError;
+      return restoredProduct as ProductRow;
+    }
+
+    const { data: insertedProduct, error: productError } = await supabaseClient
+      .from("products")
+      .insert({
+        organization_id: organization.id,
+        internal_sku: sku,
+        title: title || sku,
+        status: "active"
+      })
+      .select("id, internal_sku, title, status")
+      .single();
+
+    if (productError) throw productError;
+    return insertedProduct as ProductRow;
+  }
+
   async function addCost(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -1594,28 +1681,12 @@ export function DashmarketDashboard() {
       setDataMessage(null);
 
       try {
-        let product = realProducts.find(
-          (currentProduct) => currentProduct.internal_sku === costForm.sku
+        const saleProduct = activeSales.find((sale) => sale.sku === costForm.sku);
+        const product = await ensureProductForSku(
+          costForm.sku,
+          saleProduct?.title ?? costForm.sku
         );
-
-        if (!product) {
-          const saleProduct = activeSales.find((sale) => sale.sku === costForm.sku);
-          const { data: insertedProduct, error: productError } =
-            await supabaseClient
-              .from("products")
-              .insert({
-                organization_id: organization.id,
-                internal_sku: costForm.sku,
-                title: saleProduct?.title ?? costForm.sku
-              })
-              .select("id, internal_sku, title")
-              .single();
-
-          if (productError) throw productError;
-          product = insertedProduct as ProductRow;
-        }
-
-        const { error: costError } = await supabaseClient.from("sku_costs").insert({
+        const costPayload = {
           organization_id: organization.id,
           product_id: product.id,
           cost_name: costLabel,
@@ -1623,23 +1694,33 @@ export function DashmarketDashboard() {
           allocation_method: costForm.allocation,
           amount: Number(costForm.amount),
           valid_from: costForm.validFrom
-        });
+        };
+        const { error: costError } = editingCostId
+          ? await supabaseClient
+              .from("sku_costs")
+              .update(costPayload)
+              .eq("id", editingCostId)
+          : await supabaseClient.from("sku_costs").insert(costPayload);
 
         if (costError) throw costError;
 
         await loadCostCenter(organization.id);
-        setCostForm((current) => ({
-          ...current,
-          label: "",
-          amount: "",
-          taxPercent: ""
-        }));
-        setDataMessage("Custo salvo no Supabase.");
+        setHiddenSkus((current) =>
+          current.filter((hiddenSku) => hiddenSku !== costForm.sku)
+        );
+        resetCostFormFields();
+        setDataMessage(
+          editingCostId
+            ? "Custo atualizado no Supabase."
+            : "Custo salvo no Supabase."
+        );
       } catch (error) {
         setDataMessage(
           error instanceof Error
             ? error.message
-            : "Nao foi possivel salvar o custo."
+            : editingCostId
+              ? "Nao foi possivel atualizar o custo."
+              : "Nao foi possivel salvar o custo."
         );
       } finally {
         setIsSavingCost(false);
@@ -1648,28 +1729,104 @@ export function DashmarketDashboard() {
       return;
     }
 
-    setCosts((current) => [
-      ...current,
-      {
-        id:
-          typeof crypto !== "undefined" && "randomUUID" in crypto
-            ? crypto.randomUUID()
-            : `cost-${Date.now()}`,
-        sku: costForm.sku,
-        label: costLabel,
-        category: costForm.category,
-        amount: Number(costForm.amount),
-        allocation: costForm.allocation,
-        validFrom: costForm.validFrom
-      }
-    ]);
+    const localCost = {
+      id:
+        editingCostId ??
+        (typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? crypto.randomUUID()
+          : `cost-${Date.now()}`),
+      sku: costForm.sku,
+      label: costLabel,
+      category: costForm.category,
+      amount: Number(costForm.amount),
+      allocation: costForm.allocation,
+      validFrom: costForm.validFrom
+    };
 
-    setCostForm((current) => ({
-      ...current,
-      label: "",
-      amount: "",
-      taxPercent: ""
-    }));
+    setCosts((current) =>
+      editingCostId
+        ? current.map((cost) => (cost.id === editingCostId ? localCost : cost))
+        : [...current, localCost]
+    );
+    setHiddenSkus((current) =>
+      current.filter((hiddenSku) => hiddenSku !== costForm.sku)
+    );
+    resetCostFormFields();
+    setDataMessage(
+      editingCostId ? "Custo atualizado." : "Custo adicionado em modo demonstracao."
+    );
+  }
+
+  function startEditingCost(cost: SkuCost) {
+    setEditingCostId(cost.id);
+    setCostForm({
+      sku: cost.sku,
+      label: cost.label,
+      category: cost.category,
+      amount: String(cost.amount),
+      allocation: cost.allocation,
+      taxPercent:
+        cost.category === "tax" && cost.allocation === "percentage"
+          ? String(cost.amount)
+          : "",
+      validFrom: cost.validFrom
+    });
+    setDataMessage(`Editando custo ${cost.label} do SKU ${cost.sku}.`);
+  }
+
+  function cancelCostEditing() {
+    resetCostFormFields();
+    setDataMessage(null);
+  }
+
+  async function deleteCost(cost: SkuCost) {
+    const confirmed = window.confirm(
+      `Excluir o custo "${cost.label}" do SKU ${cost.sku}?`
+    );
+
+    if (!confirmed) return;
+
+    if (supabaseClient && organization) {
+      setIsSavingCost(true);
+      setDataMessage(null);
+
+      try {
+        const { error } = await supabaseClient
+          .from("sku_costs")
+          .delete()
+          .eq("id", cost.id);
+
+        if (error) throw error;
+
+        await loadCostCenter(organization.id);
+
+        if (editingCostId === cost.id) {
+          resetCostFormFields();
+        }
+
+        setDataMessage("Custo excluido do Centro de Custos.");
+      } catch (error) {
+        setDataMessage(
+          error instanceof Error
+            ? error.message
+            : "Nao foi possivel excluir o custo."
+        );
+      } finally {
+        setIsSavingCost(false);
+      }
+
+      return;
+    }
+
+    setCosts((current) =>
+      current.filter((currentCost) => currentCost.id !== cost.id)
+    );
+
+    if (editingCostId === cost.id) {
+      resetCostFormFields();
+    }
+
+    setDataMessage("Custo removido em modo demonstracao.");
   }
 
   function selectProductForCalculator(product: CostCenterProductRow) {
@@ -1727,6 +1884,176 @@ export function DashmarketDashboard() {
     }));
   }
 
+  function startEditingProduct(product: CostCenterProductRow) {
+    setEditingProductSku(product.sku);
+    setProductEditForm({
+      sku: product.sku,
+      title: product.title
+    });
+    setDataMessage(`Editando cadastro do SKU ${product.sku}.`);
+  }
+
+  function cancelProductEditing() {
+    setEditingProductSku(null);
+    setProductEditForm({ sku: "", title: "" });
+    setDataMessage(null);
+  }
+
+  async function saveProductEdit(originalSku: string) {
+    const nextSku = productEditForm.sku.trim();
+    const nextTitle = productEditForm.title.trim();
+
+    if (!nextSku || !nextTitle) {
+      setDataMessage("Preencha SKU e produto antes de salvar.");
+      return;
+    }
+
+    if (supabaseClient && organization) {
+      setIsSavingProduct(true);
+      setDataMessage(null);
+
+      try {
+        const currentProduct =
+          realProducts.find((product) => product.internal_sku === originalSku) ??
+          (await ensureProductForSku(originalSku, nextTitle));
+
+        const { error } = await supabaseClient
+          .from("products")
+          .update({
+            internal_sku: nextSku,
+            title: nextTitle,
+            status: "active"
+          })
+          .eq("id", currentProduct.id);
+
+        if (error) throw error;
+
+        await loadCostCenter(organization.id);
+        setCosts((current) =>
+          current.map((cost) =>
+            cost.sku === originalSku ? { ...cost, sku: nextSku } : cost
+          )
+        );
+        setHiddenSkus((current) =>
+          current.filter(
+            (hiddenSku) => hiddenSku !== originalSku && hiddenSku !== nextSku
+          )
+        );
+        cancelProductEditing();
+        setDataMessage(`SKU ${nextSku} atualizado.`);
+      } catch (error) {
+        setDataMessage(
+          error instanceof Error
+            ? error.message
+            : "Nao foi possivel atualizar o SKU."
+        );
+      } finally {
+        setIsSavingProduct(false);
+      }
+
+      return;
+    }
+
+    setCosts((current) =>
+      current.map((cost) =>
+        cost.sku === originalSku ? { ...cost, sku: nextSku } : cost
+      )
+    );
+    setCostForm((current) => ({
+      ...current,
+      sku: current.sku === originalSku ? nextSku : current.sku
+    }));
+    setCalculatorForm((current) => ({
+      ...current,
+      sku: current.sku === originalSku ? nextSku : current.sku,
+      name: current.sku === originalSku ? nextTitle : current.name
+    }));
+    setHiddenSkus((current) =>
+      current.filter(
+        (hiddenSku) => hiddenSku !== originalSku && hiddenSku !== nextSku
+      )
+    );
+    cancelProductEditing();
+    setDataMessage("SKU atualizado em modo demonstracao.");
+  }
+
+  async function archiveProduct(product: CostCenterProductRow) {
+    const confirmed = window.confirm(
+      `Excluir o SKU ${product.sku} do Centro de Custos? As vendas ja sincronizadas serao preservadas.`
+    );
+
+    if (!confirmed) return;
+
+    if (supabaseClient && organization) {
+      setIsSavingProduct(true);
+      setDataMessage(null);
+
+      try {
+        const currentProduct =
+          realProducts.find(
+            (productRecord) => productRecord.internal_sku === product.sku
+          ) ?? (await ensureProductForSku(product.sku, product.title));
+
+        const { error } = await supabaseClient
+          .from("products")
+          .update({ status: "archived" })
+          .eq("id", currentProduct.id);
+
+        if (error) throw error;
+
+        await loadCostCenter(organization.id);
+        setHiddenSkus((current) =>
+          current.includes(product.sku) ? current : [...current, product.sku]
+        );
+        setCosts((current) =>
+          current.filter((cost) => cost.sku !== product.sku)
+        );
+
+        if (editingProductSku === product.sku) {
+          cancelProductEditing();
+        }
+
+        if (costForm.sku === product.sku || calculatorForm.sku === product.sku) {
+          const nextProduct = productOptions.find(
+            (option) => option.sku !== product.sku
+          );
+
+          if (nextProduct) {
+            setCostForm((current) => ({ ...current, sku: nextProduct.sku }));
+            setCalculatorForm((current) => ({
+              ...current,
+              sku: nextProduct.sku,
+              name: nextProduct.title
+            }));
+          }
+        }
+
+        setDataMessage(`SKU ${product.sku} excluido do Centro de Custos.`);
+      } catch (error) {
+        setDataMessage(
+          error instanceof Error
+            ? error.message
+            : "Nao foi possivel excluir o SKU."
+        );
+      } finally {
+        setIsSavingProduct(false);
+      }
+
+      return;
+    }
+
+    setHiddenSkus((current) =>
+      current.includes(product.sku) ? current : [...current, product.sku]
+    );
+    setCosts((current) => current.filter((cost) => cost.sku !== product.sku));
+
+    if (editingProductSku === product.sku) {
+      cancelProductEditing();
+    }
+
+    setDataMessage("SKU removido em modo demonstracao.");
+  }
+
   async function saveCalculatorCosts() {
     const entries = buildCalculatorCostEntries(calculatorForm);
 
@@ -1740,26 +2067,10 @@ export function DashmarketDashboard() {
       setDataMessage(null);
 
       try {
-        let product = realProducts.find(
-          (currentProduct) =>
-            currentProduct.internal_sku === calculatorForm.sku
+        const product = await ensureProductForSku(
+          calculatorForm.sku,
+          calculatorForm.name || calculatorForm.sku
         );
-
-        if (!product) {
-          const { data: insertedProduct, error: productError } =
-            await supabaseClient
-              .from("products")
-              .insert({
-                organization_id: organization.id,
-                internal_sku: calculatorForm.sku,
-                title: calculatorForm.name || calculatorForm.sku
-              })
-              .select("id, internal_sku, title")
-              .single();
-
-          if (productError) throw productError;
-          product = insertedProduct as ProductRow;
-        }
 
         const { error: costError } = await supabaseClient.from("sku_costs").insert(
           entries.map((entry) => ({
@@ -1776,6 +2087,9 @@ export function DashmarketDashboard() {
         if (costError) throw costError;
 
         await loadCostCenter(organization.id);
+        setHiddenSkus((current) =>
+          current.filter((hiddenSku) => hiddenSku !== calculatorForm.sku)
+        );
         setDataMessage(
           `Custos da calculadora aplicados ao SKU ${calculatorForm.sku}.`
         );
@@ -1829,6 +2143,9 @@ export function DashmarketDashboard() {
     setAdvertisingSyncSummary(null);
     setPromotionsSyncSummary(null);
     setCosts(costsSeed);
+    setHiddenSkus([]);
+    setEditingCostId(null);
+    setEditingProductSku(null);
     setDataMessage("Sessao encerrada.");
   }
 
@@ -2934,7 +3251,9 @@ export function DashmarketDashboard() {
               >
                 <div className="flex items-center gap-2">
                   <PackagePlus aria-hidden className="h-5 w-5 text-sea" />
-                  <h2 className="text-lg font-bold">Cadastrar custo do SKU</h2>
+                  <h2 className="text-lg font-bold">
+                    {editingCostId ? "Editar custo do SKU" : "Cadastrar custo do SKU"}
+                  </h2>
                 </div>
 
                 <div className="mt-4 grid gap-3">
@@ -3110,14 +3429,33 @@ export function DashmarketDashboard() {
                     </span>
                   </label>
 
-                  <button
-                    className="mt-1 inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-ink px-4 text-sm font-bold text-white hover:bg-black"
-                    disabled={isSavingCost}
-                    type="submit"
-                  >
-                    <PackagePlus aria-hidden className="h-4 w-4" />
-                    {isSavingCost ? "Salvando" : "Adicionar custo"}
-                  </button>
+                  <div className="mt-1 grid gap-2 sm:grid-cols-2">
+                    <button
+                      className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-ink px-4 text-sm font-bold text-white hover:bg-black"
+                      disabled={isSavingCost}
+                      type="submit"
+                    >
+                      {editingCostId ? (
+                        <Save aria-hidden className="h-4 w-4" />
+                      ) : (
+                        <PackagePlus aria-hidden className="h-4 w-4" />
+                      )}
+                      {isSavingCost
+                        ? "Salvando"
+                        : editingCostId
+                          ? "Salvar alteracoes"
+                          : "Adicionar custo"}
+                    </button>
+                    {editingCostId && (
+                      <button
+                        className="inline-flex h-11 items-center justify-center rounded-lg bg-paper px-4 text-sm font-bold text-ink ring-1 ring-black/10 hover:bg-black/[0.03]"
+                        onClick={cancelCostEditing}
+                        type="button"
+                      >
+                        Cancelar
+                      </button>
+                    )}
+                  </div>
                 </div>
               </form>
 
@@ -3129,7 +3467,7 @@ export function DashmarketDashboard() {
                   </p>
                 </div>
                 <div className="table-scroll overflow-x-auto">
-                  <table className="min-w-[780px] w-full text-left text-sm">
+                  <table className="min-w-[940px] w-full text-left text-sm">
                     <thead className="bg-black/[0.025] text-xs uppercase tracking-normal text-black/50">
                       <tr>
                         <th className="px-4 py-3">SKU</th>
@@ -3138,11 +3476,17 @@ export function DashmarketDashboard() {
                         <th className="px-4 py-3">Alocação</th>
                         <th className="px-4 py-3">Valor</th>
                         <th className="px-4 py-3">Desde</th>
+                        <th className="px-4 py-3">Acoes</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-black/10">
                       {costs.map((cost) => (
-                        <tr key={cost.id}>
+                        <tr
+                          className={
+                            editingCostId === cost.id ? "bg-sea/5" : undefined
+                          }
+                          key={cost.id}
+                        >
                           <td className="px-4 py-3 font-bold">{cost.sku}</td>
                           <td className="px-4 py-3">{cost.label}</td>
                           <td className="px-4 py-3">
@@ -3155,6 +3499,28 @@ export function DashmarketDashboard() {
                               : formatCurrency.format(cost.amount)}
                           </td>
                           <td className="px-4 py-3">{cost.validFrom}</td>
+                          <td className="px-4 py-3">
+                            <div className="flex flex-wrap gap-2">
+                              <button
+                                className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-paper px-3 text-sm font-bold text-ink ring-1 ring-black/10 hover:bg-black/[0.03]"
+                                disabled={isSavingCost}
+                                onClick={() => startEditingCost(cost)}
+                                type="button"
+                              >
+                                <Pencil aria-hidden className="h-4 w-4" />
+                                Editar
+                              </button>
+                              <button
+                                className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-berry/10 px-3 text-sm font-bold text-berry ring-1 ring-berry/20 hover:bg-berry/15"
+                                disabled={isSavingCost}
+                                onClick={() => deleteCost(cost)}
+                                type="button"
+                              >
+                                <Trash2 aria-hidden className="h-4 w-4" />
+                                Excluir
+                              </button>
+                            </div>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -3424,7 +3790,7 @@ export function DashmarketDashboard() {
                   </span>
                 </div>
                 <div className="table-scroll overflow-x-auto">
-                  <table className="min-w-[1180px] w-full text-left text-sm">
+                  <table className="min-w-[1380px] w-full text-left text-sm">
                     <thead className="bg-black/[0.025] text-xs uppercase tracking-normal text-black/50">
                       <tr>
                         <th className="px-4 py-3">Produto</th>
@@ -3436,16 +3802,49 @@ export function DashmarketDashboard() {
                         <th className="px-4 py-3">Operacional</th>
                         <th className="px-4 py-3">Imposto</th>
                         <th className="px-4 py-3">Margem atual</th>
-                        <th className="px-4 py-3">Acao</th>
+                        <th className="px-4 py-3">Acoes</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-black/10">
-                      {filteredCostCenterProductRows.map((product) => (
-                        <tr className="hover:bg-black/[0.018]" key={product.sku}>
+                      {filteredCostCenterProductRows.map((product) => {
+                        const isEditingProduct = editingProductSku === product.sku;
+
+                        return (
+                          <tr className="hover:bg-black/[0.018]" key={product.sku}>
                           <td className="px-4 py-3">
-                            <p className="font-semibold text-ink">{product.title}</p>
+                            {isEditingProduct ? (
+                              <input
+                                className="h-10 w-full min-w-60 rounded-lg border border-black/10 bg-paper px-3 font-normal outline-none focus:ring-4 focus:ring-sea/20"
+                                onChange={(event) =>
+                                  setProductEditForm((current) => ({
+                                    ...current,
+                                    title: event.target.value
+                                  }))
+                                }
+                                value={productEditForm.title}
+                              />
+                            ) : (
+                              <p className="font-semibold text-ink">
+                                {product.title}
+                              </p>
+                            )}
                           </td>
-                          <td className="px-4 py-3 font-bold">{product.sku}</td>
+                          <td className="px-4 py-3 font-bold">
+                            {isEditingProduct ? (
+                              <input
+                                className="h-10 w-44 rounded-lg border border-black/10 bg-paper px-3 font-normal outline-none focus:ring-4 focus:ring-sea/20"
+                                onChange={(event) =>
+                                  setProductEditForm((current) => ({
+                                    ...current,
+                                    sku: event.target.value
+                                  }))
+                                }
+                                value={productEditForm.sku}
+                              />
+                            ) : (
+                              product.sku
+                            )}
+                          </td>
                           <td className="px-4 py-3">
                             {formatNumber.format(product.orders)} pedidos
                           </td>
@@ -3480,16 +3879,67 @@ export function DashmarketDashboard() {
                             </span>
                           </td>
                           <td className="px-4 py-3">
-                            <button
-                              className="inline-flex h-9 items-center justify-center rounded-lg bg-paper px-3 text-sm font-bold text-ink ring-1 ring-black/10 hover:bg-black/[0.03]"
-                              onClick={() => selectProductForCalculator(product)}
-                              type="button"
-                            >
-                              Calcular
-                            </button>
+                            <div className="flex flex-wrap gap-2">
+                              {isEditingProduct ? (
+                                <>
+                                  <button
+                                    className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-ink px-3 text-sm font-bold text-white hover:bg-black"
+                                    disabled={isSavingProduct}
+                                    onClick={() => saveProductEdit(product.sku)}
+                                    type="button"
+                                  >
+                                    <Save aria-hidden className="h-4 w-4" />
+                                    Salvar
+                                  </button>
+                                  <button
+                                    className="inline-flex h-9 items-center justify-center rounded-lg bg-paper px-3 text-sm font-bold text-ink ring-1 ring-black/10 hover:bg-black/[0.03]"
+                                    disabled={isSavingProduct}
+                                    onClick={cancelProductEditing}
+                                    type="button"
+                                  >
+                                    Cancelar
+                                  </button>
+                                </>
+                              ) : (
+                                <>
+                                  <button
+                                    className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-paper px-3 text-sm font-bold text-ink ring-1 ring-black/10 hover:bg-black/[0.03]"
+                                    onClick={() =>
+                                      selectProductForCalculator(product)
+                                    }
+                                    type="button"
+                                  >
+                                    <CircleDollarSign
+                                      aria-hidden
+                                      className="h-4 w-4"
+                                    />
+                                    Calcular
+                                  </button>
+                                  <button
+                                    className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-paper px-3 text-sm font-bold text-ink ring-1 ring-black/10 hover:bg-black/[0.03]"
+                                    disabled={isSavingProduct}
+                                    onClick={() => startEditingProduct(product)}
+                                    type="button"
+                                  >
+                                    <Pencil aria-hidden className="h-4 w-4" />
+                                    Editar
+                                  </button>
+                                  <button
+                                    className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-berry/10 px-3 text-sm font-bold text-berry ring-1 ring-berry/20 hover:bg-berry/15"
+                                    disabled={isSavingProduct}
+                                    onClick={() => archiveProduct(product)}
+                                    type="button"
+                                  >
+                                    <Trash2 aria-hidden className="h-4 w-4" />
+                                    Excluir SKU
+                                  </button>
+                                </>
+                              )}
+                            </div>
                           </td>
-                        </tr>
-                      ))}
+                          </tr>
+                        );
+                      })}
                       {filteredCostCenterProductRows.length === 0 && (
                         <tr>
                           <td
