@@ -197,6 +197,18 @@ function parseMercadoAdsError(status: number, path: string, body: string) {
   return `Mercado Ads respondeu ${status} em ${path}. ${apiMessage}`;
 }
 
+function mercadoAdsHint(error: MercadoAdsApiError) {
+  if ([401, 403].includes(error.status)) {
+    return "Confirme no app do Mercado Livre se a aplicacao tem escopo/permissao de Mercado Ads e se a conta vendedora tem Product Ads ativo.";
+  }
+
+  if (error.status === 404) {
+    return "A conta pode nao ter anunciante Product Ads para o site MLB ou a API de Ads pode estar indisponivel para este vendedor.";
+  }
+
+  return "Confira os detalhes retornados pelo Mercado Ads e tente novamente apos o deploy mais recente.";
+}
+
 async function refreshAccessToken(
   credentials: MarketplaceCredentials,
   accountId: string,
@@ -765,6 +777,19 @@ export async function POST(request: Request) {
       throw error;
     }
   } catch (error) {
+    if (error instanceof MercadoAdsApiError) {
+      return NextResponse.json(
+        {
+          error: error.message,
+          details: `Etapa: Mercado Ads. Endpoint: ${error.path}. Status: ${error.status}.`,
+          hint: mercadoAdsHint(error),
+          path: error.path,
+          status: error.status
+        },
+        { status: error.status === 401 ? 401 : 502 }
+      );
+    }
+
     return NextResponse.json(
       {
         error:

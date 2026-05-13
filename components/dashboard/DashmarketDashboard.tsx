@@ -106,6 +106,15 @@ type SyncPromotionsSummary = {
   syncedAt: string;
 };
 
+type ApiErrorPayload = {
+  error?: string;
+  message?: string;
+  details?: string;
+  hint?: string;
+  path?: string;
+  status?: number;
+};
+
 type CostCenterRow = {
   id: string;
   cost_name: string;
@@ -531,6 +540,33 @@ function promotionImpact(status: string | null) {
   if (normalized === "pending" || normalized === "candidate") return "Pendente";
   if (normalized === "finished" || normalized === "closed") return "Encerrada";
   return status ?? "Status aberto";
+}
+
+async function readApiPayload<T>(response: Response) {
+  const contentType = response.headers.get("content-type") ?? "";
+
+  if (contentType.includes("application/json")) {
+    return (await response.json()) as T | ApiErrorPayload;
+  }
+
+  const text = await response.text();
+  return {
+    error: text || `Resposta HTTP ${response.status}.`
+  } satisfies ApiErrorPayload;
+}
+
+function apiErrorMessage(payload: unknown, fallback: string) {
+  if (payload && typeof payload === "object") {
+    const errorPayload = payload as ApiErrorPayload;
+    const mainMessage = errorPayload.error ?? errorPayload.message ?? fallback;
+    const details = [errorPayload.details, errorPayload.hint]
+      .filter(Boolean)
+      .join(" ");
+
+    return details ? `${mainMessage} ${details}` : mainMessage;
+  }
+
+  return fallback;
 }
 
 export function DashmarketDashboard() {
@@ -1306,15 +1342,11 @@ export function DashmarketDashboard() {
         body: JSON.stringify({ organizationId: organization.id, daysBack: 30 })
       });
 
-      const payload = (await response.json()) as
-        | SyncAdvertisingSummary
-        | { error?: string };
+      const payload = await readApiPayload<SyncAdvertisingSummary>(response);
 
       if (!response.ok) {
         throw new Error(
-          "error" in payload && payload.error
-            ? payload.error
-            : "Nao foi possivel sincronizar publicidade."
+          apiErrorMessage(payload, "Nao foi possivel sincronizar publicidade.")
         );
       }
 
