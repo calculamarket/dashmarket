@@ -181,6 +181,66 @@ type SalesDetailRow = SalesDetailSourceRow & {
   marginRate: number;
 };
 
+type CostCalculatorMode = "margin" | "price" | "fixedProfit";
+
+type CostCalculatorFormState = {
+  sku: string;
+  name: string;
+  productCost: string;
+  sellingPrice: string;
+  commissionPercentage: string;
+  fixedFee: string;
+  shippingCost: string;
+  packagingCost: string;
+  collectionCost: string;
+  storageCost: string;
+  operationalCost: string;
+  taxPercentage: string;
+  promotionCredit: string;
+  desiredProfitMargin: string;
+  desiredFixedProfit: string;
+  validFrom: string;
+};
+
+type CostCalculatorResult = {
+  sellingPrice: number;
+  productCost: number;
+  commission: number;
+  fixedFee: number;
+  shippingCost: number;
+  packagingCost: number;
+  collectionCost: number;
+  storageCost: number;
+  operationalCost: number;
+  taxes: number;
+  promotionCredit: number;
+  totalCosts: number;
+  netProfit: number;
+  profitMargin: number;
+};
+
+type CalculatorCostEntry = {
+  label: string;
+  category: SkuCost["category"];
+  allocation: SkuCost["allocation"];
+  amount: number;
+};
+
+type CostCenterProductRow = {
+  sku: string;
+  title: string;
+  units: number;
+  orders: number;
+  grossRevenue: number;
+  averagePrice: number;
+  productCost: number;
+  packagingCost: number;
+  operationalCost: number;
+  taxPercentage: number;
+  contributionMargin: number;
+  contributionMarginRate: number;
+};
+
 type InventorySnapshotRow = {
   seller_sku: string | null;
   fulfillment_channel: string;
@@ -572,6 +632,15 @@ function numberFromDb(value: number | string | null | undefined) {
   return Number.isFinite(numeric) ? numeric : 0;
 }
 
+function numberFromInput(value: string) {
+  const numeric = Number(value.replace(",", ".") || 0);
+  return Number.isFinite(numeric) ? numeric : 0;
+}
+
+function inputNumber(value: number) {
+  return value > 0 ? value.toFixed(2) : "";
+}
+
 function channelLabel(channel: string) {
   const labels: Record<string, string> = {
     full: "Full",
@@ -634,6 +703,128 @@ function daysBackFromDate(dateValue: string) {
   );
 
   return Math.min(Math.max(diffInDays + 1, 1), 365);
+}
+
+function calculateCostsFromCalculator(
+  form: CostCalculatorFormState,
+  mode: CostCalculatorMode
+): CostCalculatorResult | null {
+  const productCost = numberFromInput(form.productCost);
+  let sellingPrice = numberFromInput(form.sellingPrice);
+  const commissionPercentage = numberFromInput(form.commissionPercentage);
+  const fixedFee = numberFromInput(form.fixedFee);
+  const shippingCost = numberFromInput(form.shippingCost);
+  const packagingCost = numberFromInput(form.packagingCost);
+  const collectionCost = numberFromInput(form.collectionCost);
+  const storageCost = numberFromInput(form.storageCost);
+  const operationalCost = numberFromInput(form.operationalCost);
+  const taxPercentage = numberFromInput(form.taxPercentage);
+  const promotionCredit = numberFromInput(form.promotionCredit);
+  const fixedCosts =
+    productCost +
+    fixedFee +
+    shippingCost +
+    packagingCost +
+    collectionCost +
+    storageCost +
+    operationalCost -
+    promotionCredit;
+
+  if (mode === "price") {
+    const desiredProfitMargin = numberFromInput(form.desiredProfitMargin);
+    const variablePercentage =
+      desiredProfitMargin + commissionPercentage + taxPercentage;
+
+    if (desiredProfitMargin <= 0 || variablePercentage >= 100) return null;
+    sellingPrice = fixedCosts / (1 - variablePercentage / 100);
+  }
+
+  if (mode === "fixedProfit") {
+    const desiredFixedProfit = numberFromInput(form.desiredFixedProfit);
+    const variablePercentage = commissionPercentage + taxPercentage;
+
+    if (desiredFixedProfit <= 0 || variablePercentage >= 100) return null;
+    sellingPrice = (fixedCosts + desiredFixedProfit) / (1 - variablePercentage / 100);
+  }
+
+  if (sellingPrice <= 0) return null;
+
+  const commission = sellingPrice * (commissionPercentage / 100);
+  const taxes = sellingPrice * (taxPercentage / 100);
+  const totalCosts =
+    productCost +
+    commission +
+    fixedFee +
+    shippingCost +
+    packagingCost +
+    collectionCost +
+    storageCost +
+    operationalCost +
+    taxes;
+  const netProfit = sellingPrice - totalCosts + promotionCredit;
+  const profitMargin = sellingPrice > 0 ? netProfit / sellingPrice : 0;
+
+  return {
+    sellingPrice,
+    productCost,
+    commission,
+    fixedFee,
+    shippingCost,
+    packagingCost,
+    collectionCost,
+    storageCost,
+    operationalCost,
+    taxes,
+    promotionCredit,
+    totalCosts,
+    netProfit,
+    profitMargin
+  };
+}
+
+function buildCalculatorCostEntries(
+  form: CostCalculatorFormState
+): CalculatorCostEntry[] {
+  const entries: CalculatorCostEntry[] = [
+    {
+      label: "Fornecedor",
+      category: "product",
+      allocation: "per_unit",
+      amount: numberFromInput(form.productCost)
+    },
+    {
+      label: "Embalagem",
+      category: "packaging",
+      allocation: "per_unit",
+      amount: numberFromInput(form.packagingCost)
+    },
+    {
+      label: "Coleta",
+      category: "inbound_freight",
+      allocation: "per_unit",
+      amount: numberFromInput(form.collectionCost)
+    },
+    {
+      label: "Armazenagem",
+      category: "other",
+      allocation: "per_unit",
+      amount: numberFromInput(form.storageCost)
+    },
+    {
+      label: "Operacional",
+      category: "other",
+      allocation: "per_unit",
+      amount: numberFromInput(form.operationalCost)
+    },
+    {
+      label: "Imposto",
+      category: "tax",
+      allocation: "percentage",
+      amount: numberFromInput(form.taxPercentage)
+    }
+  ];
+
+  return entries.filter((entry) => entry.amount > 0);
 }
 
 function calculateCostForDetail(cost: SkuCost, sale: SalesDetailSourceRow) {
@@ -752,6 +943,28 @@ export function DashmarketDashboard() {
     taxPercent: "",
     validFrom: "2026-05-01"
   });
+  const [calculatorMode, setCalculatorMode] =
+    useState<CostCalculatorMode>("margin");
+  const [calculatorForm, setCalculatorForm] = useState<CostCalculatorFormState>({
+    sku: salesSeed[0].sku,
+    name: salesSeed[0].title,
+    productCost: "",
+    sellingPrice: inputNumber(salesSeed[0].grossRevenue / salesSeed[0].units),
+    commissionPercentage: "16",
+    fixedFee: "",
+    shippingCost: "",
+    packagingCost: "",
+    collectionCost: "",
+    storageCost: "",
+    operationalCost: "",
+    taxPercentage: "",
+    promotionCredit: "",
+    desiredProfitMargin: "15",
+    desiredFixedProfit: "",
+    validFrom: dateOnly(new Date())
+  });
+  const [costProductSearch, setCostProductSearch] = useState("");
+  const [isSavingCalculatorCosts, setIsSavingCalculatorCosts] = useState(false);
   const [salesFilters, setSalesFilters] = useState({
     dateFrom: daysAgo(30),
     dateTo: dateOnly(new Date()),
@@ -784,6 +997,17 @@ export function DashmarketDashboard() {
         ? current
         : { ...current, sku: productOptions[0].sku }
     );
+    setCalculatorForm((current) => {
+      if (productOptions.some((product) => product.sku === current.sku)) {
+        return current;
+      }
+
+      return {
+        ...current,
+        sku: productOptions[0].sku,
+        name: productOptions[0].title
+      };
+    });
   }, [productOptions]);
 
   const selectedAdapter = getMarketplaceAdapter(selectedProvider);
@@ -939,6 +1163,77 @@ export function DashmarketDashboard() {
 
   const marginRate =
     totals.netRevenue > 0 ? totals.contributionMargin / totals.netRevenue : 0;
+
+  const costCenterProductRows = useMemo<CostCenterProductRow[]>(
+    () =>
+      productOptions
+        .map((product) => {
+          const sale = activeSales.find((record) => record.sku === product.sku);
+          const margin = marginRows.find((row) => row.sku === product.sku);
+          const productCosts = costs.filter((cost) => cost.sku === product.sku);
+          const productCost = productCosts
+            .filter(
+              (cost) =>
+                cost.category === "product" && cost.allocation === "per_unit"
+            )
+            .reduce((total, cost) => total + cost.amount, 0);
+          const packagingCost = productCosts
+            .filter(
+              (cost) =>
+                cost.category === "packaging" && cost.allocation === "per_unit"
+            )
+            .reduce((total, cost) => total + cost.amount, 0);
+          const operationalCost = productCosts
+            .filter(
+              (cost) =>
+                cost.category !== "product" &&
+                cost.category !== "packaging" &&
+                cost.category !== "tax" &&
+                cost.allocation === "per_unit"
+            )
+            .reduce((total, cost) => total + cost.amount, 0);
+          const taxPercentage = productCosts
+            .filter(
+              (cost) => cost.category === "tax" && cost.allocation === "percentage"
+            )
+            .reduce((total, cost) => total + cost.amount, 0);
+          const units = sale?.units ?? 0;
+          const grossRevenue = sale?.grossRevenue ?? 0;
+
+          return {
+            sku: product.sku,
+            title: product.title,
+            units,
+            orders: sale?.orders ?? 0,
+            grossRevenue,
+            averagePrice: units > 0 ? grossRevenue / units : 0,
+            productCost,
+            packagingCost,
+            operationalCost,
+            taxPercentage,
+            contributionMargin: margin?.contributionMargin ?? 0,
+            contributionMarginRate: margin?.contributionMarginRate ?? 0
+          };
+        })
+        .sort((current, next) => next.grossRevenue - current.grossRevenue),
+    [activeSales, costs, marginRows, productOptions]
+  );
+
+  const filteredCostCenterProductRows = useMemo(() => {
+    const query = costProductSearch.trim().toLowerCase();
+
+    return costCenterProductRows.filter(
+      (product) =>
+        !query ||
+        product.sku.toLowerCase().includes(query) ||
+        product.title.toLowerCase().includes(query)
+    );
+  }, [costCenterProductRows, costProductSearch]);
+
+  const calculatorResult = useMemo(
+    () => calculateCostsFromCalculator(calculatorForm, calculatorMode),
+    [calculatorForm, calculatorMode]
+  );
 
   const loadCostCenter = useCallback(async (organizationId: string) => {
     if (!supabaseClient) return;
@@ -1375,6 +1670,144 @@ export function DashmarketDashboard() {
       amount: "",
       taxPercent: ""
     }));
+  }
+
+  function selectProductForCalculator(product: CostCenterProductRow) {
+    const productCosts = costs.filter((cost) => cost.sku === product.sku);
+    const collectionCost = productCosts
+      .filter(
+        (cost) =>
+          cost.category === "inbound_freight" && cost.allocation === "per_unit"
+      )
+      .reduce((total, cost) => total + cost.amount, 0);
+    const storageCost = productCosts
+      .filter(
+        (cost) =>
+          cost.category === "other" &&
+          cost.label.toLowerCase().includes("armazen") &&
+          cost.allocation === "per_unit"
+      )
+      .reduce((total, cost) => total + cost.amount, 0);
+    const operationalCost = Math.max(
+      0,
+      product.operationalCost - collectionCost - storageCost
+    );
+    const averageMarketplaceFeeRate =
+      product.grossRevenue > 0
+        ? (activeSales.find((sale) => sale.sku === product.sku)?.marketplaceFees ??
+            0) / product.grossRevenue
+        : 0;
+
+    setCostForm((current) => ({ ...current, sku: product.sku }));
+    setCalculatorForm((current) => ({
+      ...current,
+      sku: product.sku,
+      name: product.title,
+      productCost: inputNumber(product.productCost),
+      sellingPrice:
+        product.averagePrice > 0
+          ? inputNumber(product.averagePrice)
+          : current.sellingPrice,
+      commissionPercentage:
+        averageMarketplaceFeeRate > 0
+          ? (averageMarketplaceFeeRate * 100).toFixed(2)
+          : current.commissionPercentage,
+      shippingCost:
+        product.units > 0
+          ? inputNumber(
+              (activeSales.find((sale) => sale.sku === product.sku)
+                ?.shippingCosts ?? 0) / product.units
+            )
+          : current.shippingCost,
+      packagingCost: inputNumber(product.packagingCost),
+      collectionCost: inputNumber(collectionCost),
+      storageCost: inputNumber(storageCost),
+      operationalCost: inputNumber(operationalCost),
+      taxPercentage: inputNumber(product.taxPercentage)
+    }));
+  }
+
+  async function saveCalculatorCosts() {
+    const entries = buildCalculatorCostEntries(calculatorForm);
+
+    if (!calculatorForm.sku || entries.length === 0) {
+      setDataMessage("Preencha ao menos um custo interno para salvar no SKU.");
+      return;
+    }
+
+    if (supabaseClient && organization) {
+      setIsSavingCalculatorCosts(true);
+      setDataMessage(null);
+
+      try {
+        let product = realProducts.find(
+          (currentProduct) =>
+            currentProduct.internal_sku === calculatorForm.sku
+        );
+
+        if (!product) {
+          const { data: insertedProduct, error: productError } =
+            await supabaseClient
+              .from("products")
+              .insert({
+                organization_id: organization.id,
+                internal_sku: calculatorForm.sku,
+                title: calculatorForm.name || calculatorForm.sku
+              })
+              .select("id, internal_sku, title")
+              .single();
+
+          if (productError) throw productError;
+          product = insertedProduct as ProductRow;
+        }
+
+        const { error: costError } = await supabaseClient.from("sku_costs").insert(
+          entries.map((entry) => ({
+            organization_id: organization.id,
+            product_id: product.id,
+            cost_name: entry.label,
+            cost_category: entry.category,
+            allocation_method: entry.allocation,
+            amount: entry.amount,
+            valid_from: calculatorForm.validFrom
+          }))
+        );
+
+        if (costError) throw costError;
+
+        await loadCostCenter(organization.id);
+        setDataMessage(
+          `Custos da calculadora aplicados ao SKU ${calculatorForm.sku}.`
+        );
+      } catch (error) {
+        setDataMessage(
+          error instanceof Error
+            ? error.message
+            : "Nao foi possivel salvar os custos da calculadora."
+        );
+      } finally {
+        setIsSavingCalculatorCosts(false);
+      }
+
+      return;
+    }
+
+    setCosts((current) => [
+      ...current,
+      ...entries.map((entry) => ({
+        id:
+          typeof crypto !== "undefined" && "randomUUID" in crypto
+            ? crypto.randomUUID()
+            : `cost-${Date.now()}-${entry.label}`,
+        sku: calculatorForm.sku,
+        label: entry.label,
+        category: entry.category,
+        amount: entry.amount,
+        allocation: entry.allocation,
+        validFrom: calculatorForm.validFrom
+      }))
+    ]);
+    setDataMessage(`Custos simulados aplicados ao SKU ${calculatorForm.sku}.`);
   }
 
   async function signOut() {
@@ -2493,7 +2926,8 @@ export function DashmarketDashboard() {
           )}
 
           {activeView === "custos" && (
-            <section className="mt-5 grid gap-5 xl:grid-cols-[380px_1fr]">
+            <section className="mt-5 grid gap-5">
+              <section className="grid gap-5 xl:grid-cols-[380px_1fr]">
               <form
                 className="rounded-lg border border-black/10 bg-white p-4 shadow-sm"
                 onSubmit={addCost}
@@ -2723,6 +3157,349 @@ export function DashmarketDashboard() {
                           <td className="px-4 py-3">{cost.validFrom}</td>
                         </tr>
                       ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+              </section>
+
+              <section className="rounded-lg border border-black/10 bg-white shadow-sm">
+                <div className="border-b border-black/10 p-4">
+                  <div className="flex items-center gap-2">
+                    <CircleDollarSign aria-hidden className="h-5 w-5 text-sea" />
+                    <h2 className="text-lg font-bold">Calculadora de custos</h2>
+                  </div>
+                  <p className="text-sm text-black/60">
+                    Simule preco, custo e margem por SKU antes de aplicar no Centro de Custos.
+                  </p>
+                </div>
+
+                <div className="grid gap-5 p-4 xl:grid-cols-[1.25fr_0.75fr]">
+                  <div className="grid gap-4">
+                    <div className="grid gap-3 md:grid-cols-3">
+                      <label className="grid gap-1 text-sm font-semibold">
+                        SKU
+                        <select
+                          className="h-10 rounded-lg border border-black/10 bg-paper px-3 font-normal outline-none focus:ring-4 focus:ring-sea/20"
+                          onChange={(event) => {
+                            const product = costCenterProductRows.find(
+                              (currentProduct) =>
+                                currentProduct.sku === event.target.value
+                            );
+
+                            if (product) {
+                              selectProductForCalculator(product);
+                              return;
+                            }
+
+                            setCalculatorForm((current) => ({
+                              ...current,
+                              sku: event.target.value
+                            }));
+                          }}
+                          value={calculatorForm.sku}
+                        >
+                          {productOptions.map((product) => (
+                            <option key={product.sku} value={product.sku}>
+                              {product.sku}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+
+                      <label className="grid gap-1 text-sm font-semibold md:col-span-2">
+                        Produto
+                        <input
+                          className="h-10 rounded-lg border border-black/10 bg-paper px-3 font-normal outline-none focus:ring-4 focus:ring-sea/20"
+                          onChange={(event) =>
+                            setCalculatorForm((current) => ({
+                              ...current,
+                              name: event.target.value
+                            }))
+                          }
+                          placeholder="Titulo do produto"
+                          value={calculatorForm.name}
+                        />
+                      </label>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                      {[
+                        ["margin", "Calcular margem"],
+                        ["price", "Preco por margem"],
+                        ["fixedProfit", "Preco por lucro"]
+                      ].map(([mode, label]) => (
+                        <button
+                          className={`h-9 rounded-lg px-3 text-sm font-bold ring-1 ${
+                            calculatorMode === mode
+                              ? "bg-ink text-white ring-ink"
+                              : "bg-paper text-ink ring-black/10 hover:bg-black/[0.03]"
+                          }`}
+                          key={mode}
+                          onClick={() => setCalculatorMode(mode as CostCalculatorMode)}
+                          type="button"
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="grid gap-3 md:grid-cols-4">
+                      {[
+                        ["productCost", "Custo produto", "0,00"],
+                        ["sellingPrice", "Preco venda", "0,00"],
+                        ["commissionPercentage", "Comissao (%)", "16,00"],
+                        ["fixedFee", "Tarifa fixa", "0,00"],
+                        ["shippingCost", "Frete vendedor", "0,00"],
+                        ["packagingCost", "Embalagem", "0,00"],
+                        ["collectionCost", "Coleta", "0,00"],
+                        ["storageCost", "Armazenagem", "0,00"],
+                        ["operationalCost", "Operacional", "0,00"],
+                        ["taxPercentage", "Imposto (%)", "0,00"],
+                        ["promotionCredit", "Credito promocao", "0,00"],
+                        ["validFrom", "Vigencia", ""]
+                      ].map(([field, label, placeholder]) => (
+                        <label className="grid gap-1 text-sm font-semibold" key={field}>
+                          {label}
+                          <input
+                            className="h-10 rounded-lg border border-black/10 bg-paper px-3 font-normal outline-none focus:ring-4 focus:ring-sea/20"
+                            min="0"
+                            onChange={(event) =>
+                              setCalculatorForm((current) => ({
+                                ...current,
+                                [field]: event.target.value
+                              }))
+                            }
+                            placeholder={placeholder}
+                            step="0.01"
+                            type={field === "validFrom" ? "date" : "number"}
+                            value={
+                              calculatorForm[
+                                field as keyof CostCalculatorFormState
+                              ]
+                            }
+                          />
+                        </label>
+                      ))}
+
+                      {calculatorMode === "price" && (
+                        <label className="grid gap-1 text-sm font-semibold">
+                          Margem desejada (%)
+                          <input
+                            className="h-10 rounded-lg border border-black/10 bg-paper px-3 font-normal outline-none focus:ring-4 focus:ring-sea/20"
+                            min="0"
+                            onChange={(event) =>
+                              setCalculatorForm((current) => ({
+                                ...current,
+                                desiredProfitMargin: event.target.value
+                              }))
+                            }
+                            placeholder="15,00"
+                            step="0.01"
+                            type="number"
+                            value={calculatorForm.desiredProfitMargin}
+                          />
+                        </label>
+                      )}
+
+                      {calculatorMode === "fixedProfit" && (
+                        <label className="grid gap-1 text-sm font-semibold">
+                          Lucro desejado
+                          <input
+                            className="h-10 rounded-lg border border-black/10 bg-paper px-3 font-normal outline-none focus:ring-4 focus:ring-sea/20"
+                            min="0"
+                            onChange={(event) =>
+                              setCalculatorForm((current) => ({
+                                ...current,
+                                desiredFixedProfit: event.target.value
+                              }))
+                            }
+                            placeholder="10,00"
+                            step="0.01"
+                            type="number"
+                            value={calculatorForm.desiredFixedProfit}
+                          />
+                        </label>
+                      )}
+                    </div>
+                  </div>
+
+                  <section className="rounded-lg border border-black/10 bg-paper p-4">
+                    <h3 className="text-base font-bold">Resumo da calculadora</h3>
+                    {calculatorResult ? (
+                      <div className="mt-4 grid gap-2 text-sm">
+                        {[
+                          ["Preco de venda", calculatorResult.sellingPrice],
+                          ["Custo produto", -calculatorResult.productCost],
+                          ["Comissao", -calculatorResult.commission],
+                          ["Tarifa fixa", -calculatorResult.fixedFee],
+                          ["Frete vendedor", -calculatorResult.shippingCost],
+                          ["Embalagem", -calculatorResult.packagingCost],
+                          ["Coleta", -calculatorResult.collectionCost],
+                          ["Armazenagem", -calculatorResult.storageCost],
+                          ["Operacional", -calculatorResult.operationalCost],
+                          ["Impostos", -calculatorResult.taxes],
+                          ["Credito promocao", calculatorResult.promotionCredit]
+                        ]
+                          .filter(([, value]) => Number(value) !== 0)
+                          .map(([label, value]) => (
+                            <div className="flex justify-between gap-3" key={label}>
+                              <span className="text-black/60">{label}</span>
+                              <span className="font-semibold text-ink">
+                                {formatCurrency.format(Number(value))}
+                              </span>
+                            </div>
+                          ))}
+
+                        <div className="mt-2 border-t border-black/10 pt-3">
+                          <div className="flex justify-between gap-3 font-bold">
+                            <span>Total de custos</span>
+                            <span>{formatCurrency.format(calculatorResult.totalCosts)}</span>
+                          </div>
+                          <div
+                            className={`mt-2 flex justify-between gap-3 text-base font-bold ${
+                              calculatorResult.netProfit >= 0
+                                ? "text-sea"
+                                : "text-berry"
+                            }`}
+                          >
+                            <span>Lucro liquido</span>
+                            <span>{formatCurrency.format(calculatorResult.netProfit)}</span>
+                          </div>
+                          <div
+                            className={`mt-1 flex justify-between gap-3 font-bold ${
+                              calculatorResult.profitMargin >= 0
+                                ? "text-sea"
+                                : "text-berry"
+                            }`}
+                          >
+                            <span>Margem</span>
+                            <span>{formatPercent(calculatorResult.profitMargin)}</span>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="mt-4 text-sm text-black/55">
+                        Informe custos e preço ou uma meta valida.
+                      </p>
+                    )}
+
+                    <button
+                      className="mt-4 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-ink px-4 text-sm font-bold text-white hover:bg-black"
+                      disabled={isSavingCalculatorCosts}
+                      onClick={saveCalculatorCosts}
+                      type="button"
+                    >
+                      <PackagePlus aria-hidden className="h-4 w-4" />
+                      {isSavingCalculatorCosts
+                        ? "Salvando"
+                        : "Aplicar custos internos"}
+                    </button>
+                    <p className="mt-2 text-xs text-black/55">
+                      Comissao, tarifa e frete ficam como simulacao; o Mercado Livre ja traz esses valores nas vendas.
+                    </p>
+                  </section>
+                </div>
+              </section>
+
+              <section className="rounded-lg border border-black/10 bg-white shadow-sm">
+                <div className="flex flex-col gap-3 border-b border-black/10 p-4 lg:flex-row lg:items-center lg:justify-between">
+                  <div>
+                    <h2 className="text-lg font-bold">Produtos do Centro de Custos</h2>
+                    <p className="text-sm text-black/60">
+                      SKUs sincronizados e custos cadastrados para conciliar as vendas.
+                    </p>
+                  </div>
+                  <span className="relative w-full lg:w-80">
+                    <Search
+                      aria-hidden
+                      className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-black/40"
+                    />
+                    <input
+                      className="h-10 w-full rounded-lg border border-black/10 bg-paper pl-9 pr-3 text-sm outline-none focus:ring-4 focus:ring-sea/20"
+                      onChange={(event) => setCostProductSearch(event.target.value)}
+                      placeholder="Buscar SKU ou produto"
+                      value={costProductSearch}
+                    />
+                  </span>
+                </div>
+                <div className="table-scroll overflow-x-auto">
+                  <table className="min-w-[1180px] w-full text-left text-sm">
+                    <thead className="bg-black/[0.025] text-xs uppercase tracking-normal text-black/50">
+                      <tr>
+                        <th className="px-4 py-3">Produto</th>
+                        <th className="px-4 py-3">SKU</th>
+                        <th className="px-4 py-3">Vendas</th>
+                        <th className="px-4 py-3">Preco medio</th>
+                        <th className="px-4 py-3">Custo produto</th>
+                        <th className="px-4 py-3">Embalagem</th>
+                        <th className="px-4 py-3">Operacional</th>
+                        <th className="px-4 py-3">Imposto</th>
+                        <th className="px-4 py-3">Margem atual</th>
+                        <th className="px-4 py-3">Acao</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-black/10">
+                      {filteredCostCenterProductRows.map((product) => (
+                        <tr className="hover:bg-black/[0.018]" key={product.sku}>
+                          <td className="px-4 py-3">
+                            <p className="font-semibold text-ink">{product.title}</p>
+                          </td>
+                          <td className="px-4 py-3 font-bold">{product.sku}</td>
+                          <td className="px-4 py-3">
+                            {formatNumber.format(product.orders)} pedidos
+                          </td>
+                          <td className="px-4 py-3">
+                            {formatCurrency.format(product.averagePrice)}
+                          </td>
+                          <td className="px-4 py-3">
+                            {formatCurrency.format(product.productCost)}
+                          </td>
+                          <td className="px-4 py-3">
+                            {formatCurrency.format(product.packagingCost)}
+                          </td>
+                          <td className="px-4 py-3">
+                            {formatCurrency.format(product.operationalCost)}
+                          </td>
+                          <td className="px-4 py-3">
+                            {product.taxPercentage.toLocaleString("pt-BR", {
+                              maximumFractionDigits: 2
+                            })}
+                            %
+                          </td>
+                          <td
+                            className={`px-4 py-3 font-bold ${
+                              product.contributionMargin >= 0
+                                ? "text-sea"
+                                : "text-berry"
+                            }`}
+                          >
+                            {formatCurrency.format(product.contributionMargin)}
+                            <span className="ml-2 text-xs">
+                              {formatPercent(product.contributionMarginRate)}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <button
+                              className="inline-flex h-9 items-center justify-center rounded-lg bg-paper px-3 text-sm font-bold text-ink ring-1 ring-black/10 hover:bg-black/[0.03]"
+                              onClick={() => selectProductForCalculator(product)}
+                              type="button"
+                            >
+                              Calcular
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                      {filteredCostCenterProductRows.length === 0 && (
+                        <tr>
+                          <td
+                            className="px-4 py-8 text-center text-black/55"
+                            colSpan={10}
+                          >
+                            Nenhum produto encontrado.
+                          </td>
+                        </tr>
+                      )}
                     </tbody>
                   </table>
                 </div>
