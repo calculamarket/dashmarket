@@ -76,6 +76,22 @@ type MercadoLivreOrdersSearchResponse = {
   };
 };
 
+type MercadoLivreShipmentCosts = {
+  gross_amount?: number | null;
+  receiver?: {
+    user_id?: number | string | null;
+    cost?: number | null;
+    compensation?: number | null;
+    save?: number | null;
+  } | null;
+  senders?: Array<{
+    user_id?: number | string | null;
+    cost?: number | null;
+    compensation?: number | null;
+    save?: number | null;
+  }> | null;
+};
+
 type ListingRow = {
   id: string;
   product_id: string | null;
@@ -94,6 +110,13 @@ type OrderRow = {
   provider_order_id: string;
 };
 
+type DashmarketShippingPayload = {
+  buyer_cost_amount: number;
+  seller_cost_amount: number;
+  gross_amount: number;
+  source: "shipments_costs" | "order";
+};
+
 type NormalizedOrderItem = {
   externalItemId: string | null;
   sellerSku: string;
@@ -103,7 +126,9 @@ type NormalizedOrderItem = {
   grossAmount: number;
   marketplaceFeeAmount: number;
   discountAmount: number;
-  rawPayload: MercadoLivreOrderItem;
+  rawPayload: MercadoLivreOrderItem & {
+    dashmarket_shipping?: DashmarketShippingPayload;
+  };
 };
 
 type NormalizedOrder = {
@@ -114,11 +139,17 @@ type NormalizedOrder = {
   grossAmount: number;
   marketplaceFeeAmount: number;
   shippingCostAmount: number;
+  buyerShippingCostAmount: number;
+  sellerShippingCostAmount: number;
+  shippingGrossAmount: number;
+  shippingCostSource: DashmarketShippingPayload["source"];
   discountsAmount: number;
   taxesAmount: number;
   netAmount: number;
   items: NormalizedOrderItem[];
-  rawPayload: MercadoLivreOrder;
+  rawPayload: MercadoLivreOrder & {
+    dashmarket_shipping?: DashmarketShippingPayload;
+  };
 };
 
 const MAX_ORDERS_PER_SYNC = 10000;
@@ -146,6 +177,47 @@ function toNumber(value: unknown) {
 function normalizeSku(value?: string | null) {
   const normalized = value?.trim();
   return normalized ? normalized.slice(0, 120) : null;
+}
+
+function sellerShippingCostFromShipment(
+  shipmentCosts: MercadoLivreShipmentCosts | null | undefined,
+  sellerId: string
+) {
+  const senders = shipmentCosts?.senders ?? [];
+  const sellerSenders = senders.filter(
+    (sender) => String(sender.user_id ?? "") === sellerId
+  );
+  const selectedSenders = sellerSenders.length > 0 ? sellerSenders : senders;
+
+  return selectedSenders.reduce((total, sender) => total + toNumber(sender.cost), 0);
+}
+
+function shippingAmountsFromOrder(
+  order: MercadoLivreOrder,
+  shipmentCosts: MercadoLivreShipmentCosts | null | undefined,
+  sellerId: string
+) {
+  const buyerCostFromShipment = toNumber(shipmentCosts?.receiver?.cost);
+  const sellerCostFromShipment = sellerShippingCostFromShipment(
+    shipmentCosts,
+    sellerId
+  );
+  const orderShippingCost = toNumber(order.shipping_cost ?? order.shipping?.cost);
+  const hasShipmentCosts = Boolean(shipmentCosts);
+
+  return {
+    buyerShippingCostAmount:
+      buyerCostFromShipment > 0 ? buyerCostFromShipment : orderShippingCost,
+    sellerShippingCostAmount: sellerCostFromShipment,
+    shippingGrossAmount: toNumber(shipmentCosts?.gross_amount),
+    shippingCostSource: hasShipmentCosts ? "shipments_costs" : "order"
+  } satisfies Pick<
+    NormalizedOrder,
+    | "buyerShippingCostAmount"
+    | "sellerShippingCostAmount"
+    | "shippingGrossAmount"
+    | "shippingCostSource"
+  >;
 }
 
 function isTokenExpiring(credentials: MarketplaceCredentials) {
@@ -219,6 +291,63 @@ async function fetchOrderDetails(orderId: number | string, accessToken: string) 
   return mercadoLivreRequest<MercadoLivreOrder>(`/orders/${orderId}`, accessToken);
 }
 
+async function fetchShipmentCosts(shippingId: string, accessToken: string) {
+  try {
+    return await mercadoLivreRequest<MercadoLivreShipmentCosts>(
+      `/shipments/${shippingId}/costs`,
+      accessToken
+    );
+  } catch {
+    return null;
+  }
+}
+
+function getShippingId(order: MercadoLivreOrder) {
+  const shippingId = order.shipping?.id;
+  return shippingId === null || shippingId === undefined ? null : String(shippingId);
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  worker: (item: T) => Promise<R>
+) {
+  const results: R[] = [];
+
+  for (let index = 0; index < items.length; index += limit) {
+    const chunk = items.slice(index, index + limit);
+    results.push(...(await Promise.all(chunk.map(worker))));
+  }
+
+  return results;
+}
+
+async function fetchShipmentCostsById(
+  orders: MercadoLivreOrder[],
+  accessToken: string
+) {
+  const shippingIds = Array.from(
+    new Set(
+      orders
+        .map(getShippingId)
+        .filter((shippingId): shippingId is string => Boolean(shippingId))
+    )
+  );
+  const shipmentCosts = await mapWithConcurrency(
+    shippingIds,
+    8,
+    async (shippingId) =>
+      [shippingId, await fetchShipmentCosts(shippingId, accessToken)] as const
+  );
+
+  return new Map(
+    shipmentCosts.filter(
+      (entry): entry is readonly [string, MercadoLivreShipmentCosts] =>
+        Boolean(entry[1])
+    )
+  );
+}
+
 async function fetchOrders(
   sellerId: string,
   accessToken: string,
@@ -272,7 +401,9 @@ async function fetchOrders(
 
 function normalizeOrder(
   order: MercadoLivreOrder,
-  listingsByItemId: Map<string, ListingRow>
+  listingsByItemId: Map<string, ListingRow>,
+  shipmentCosts: MercadoLivreShipmentCosts | null | undefined,
+  sellerId: string
 ): NormalizedOrder {
   const items = (order.order_items ?? []).map((orderItem) => {
     const externalItemId = orderItem.item?.id ?? null;
@@ -311,7 +442,13 @@ function normalizeOrder(
     (total, item) => total + item.marketplaceFeeAmount,
     0
   );
-  const shippingCostAmount = toNumber(order.shipping_cost ?? order.shipping?.cost);
+  const {
+    buyerShippingCostAmount,
+    sellerShippingCostAmount,
+    shippingGrossAmount,
+    shippingCostSource
+  } = shippingAmountsFromOrder(order, shipmentCosts, sellerId);
+  const shippingCostAmount = sellerShippingCostAmount;
   const taxesAmount = toNumber(order.taxes?.amount);
   const discountRatio = itemGrossAmount > 0 ? discountsAmount / itemGrossAmount : 0;
 
@@ -335,11 +472,23 @@ function normalizeOrder(
     grossAmount,
     marketplaceFeeAmount,
     shippingCostAmount,
+    buyerShippingCostAmount,
+    sellerShippingCostAmount,
+    shippingGrossAmount,
+    shippingCostSource,
     discountsAmount,
     taxesAmount,
     netAmount,
     items: itemsWithDiscount,
-    rawPayload: order
+    rawPayload: {
+      ...order,
+      dashmarket_shipping: {
+        buyer_cost_amount: buyerShippingCostAmount,
+        seller_cost_amount: sellerShippingCostAmount,
+        gross_amount: shippingGrossAmount,
+        source: shippingCostSource
+      }
+    }
   };
 }
 
@@ -480,8 +629,14 @@ export async function POST(request: Request) {
           listing
         ])
       );
+      const shipmentCostsById = await fetchShipmentCostsById(orders, accessToken);
       const normalizedOrders = orders.map((order) =>
-        normalizeOrder(order, listingsByItemId)
+        normalizeOrder(
+          order,
+          listingsByItemId,
+          shipmentCostsById.get(getShippingId(order) ?? ""),
+          currentAccount.external_seller_id
+        )
       );
       const productCandidates = new Map<string, { internal_sku: string; title: string }>();
 
@@ -589,9 +744,15 @@ export async function POST(request: Request) {
           const listing = item.externalItemId
             ? listingsByItemId.get(item.externalItemId)
             : null;
-          const itemShippingCost =
+          const itemBuyerShippingCost =
             order.grossAmount > 0
-              ? order.shippingCostAmount * (item.grossAmount / order.grossAmount)
+              ? order.buyerShippingCostAmount *
+                (item.grossAmount / order.grossAmount)
+              : 0;
+          const itemSellerShippingCost =
+            order.grossAmount > 0
+              ? order.sellerShippingCostAmount *
+                (item.grossAmount / order.grossAmount)
               : 0;
 
           return {
@@ -606,9 +767,21 @@ export async function POST(request: Request) {
             unit_price: item.unitPrice,
             gross_amount: item.grossAmount,
             marketplace_fee_amount: item.marketplaceFeeAmount,
-            shipping_cost_amount: itemShippingCost,
+            shipping_cost_amount: itemSellerShippingCost,
             discount_amount: item.discountAmount,
-            raw_payload: item.rawPayload
+            raw_payload: {
+              ...item.rawPayload,
+              dashmarket_shipping: {
+                buyer_cost_amount: itemBuyerShippingCost,
+                seller_cost_amount: itemSellerShippingCost,
+                gross_amount:
+                  order.grossAmount > 0
+                    ? order.shippingGrossAmount *
+                      (item.grossAmount / order.grossAmount)
+                    : 0,
+                source: order.shippingCostSource
+              }
+            }
           };
         });
       });

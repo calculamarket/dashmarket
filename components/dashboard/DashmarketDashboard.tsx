@@ -137,6 +137,7 @@ type OrderItemRow = {
   marketplace_fee_amount: number | string;
   shipping_cost_amount: number | string;
   discount_amount: number | string;
+  raw_payload?: OrderItemRawPayload | null;
   orders?: OrderRelationRow | OrderRelationRow[] | null;
 };
 
@@ -164,6 +165,13 @@ type SalesDetailSourceRow = {
   shippingSeller: number;
   discountAmount: number;
   orderTaxAmount: number;
+};
+
+type OrderItemRawPayload = {
+  dashmarket_shipping?: {
+    buyer_cost_amount?: number | string | null;
+    seller_cost_amount?: number | string | null;
+  } | null;
 };
 
 type SalesDetailRow = SalesDetailSourceRow & {
@@ -527,6 +535,22 @@ function getRelatedOrder(row: OrderItemRow) {
   return row.orders ?? null;
 }
 
+function getOrderItemShippingAmounts(row: OrderItemRow) {
+  const shippingPayload = row.raw_payload?.dashmarket_shipping;
+
+  if (shippingPayload) {
+    return {
+      buyer: numberFromDb(shippingPayload.buyer_cost_amount),
+      seller: numberFromDb(shippingPayload.seller_cost_amount)
+    };
+  }
+
+  return {
+    buyer: 0,
+    seller: numberFromDb(row.shipping_cost_amount)
+  };
+}
+
 function mapCostCenterRow(row: CostCenterRow): SkuCost | null {
   const product = getRelatedProduct(row);
   if (!product) return null;
@@ -810,12 +834,11 @@ export function DashmarketDashboard() {
           const totalTaxAmount = sale.orderTaxAmount + taxAmount;
           const contributionMargin =
             sale.grossAmount -
-            sale.discountAmount -
-            sale.marketplaceFee -
-            sale.shippingSeller -
-            sale.shippingBuyer -
-            costAmount -
-            totalTaxAmount;
+          sale.discountAmount -
+          sale.marketplaceFee -
+          sale.shippingSeller -
+          costAmount -
+          totalTaxAmount;
 
           return {
             ...sale,
@@ -954,7 +977,7 @@ export function DashmarketDashboard() {
     const { data, error } = await supabaseClient
       .from("order_items")
       .select(
-        "id, external_item_id, seller_sku, title, quantity, unit_price, gross_amount, marketplace_fee_amount, shipping_cost_amount, discount_amount, orders(provider_order_id, sold_at, status, gross_amount, taxes_amount)"
+        "id, external_item_id, seller_sku, title, quantity, unit_price, gross_amount, marketplace_fee_amount, shipping_cost_amount, discount_amount, raw_payload, orders(provider_order_id, sold_at, status, gross_amount, taxes_amount)"
       )
       .eq("organization_id", organizationId)
       .limit(SALES_DETAIL_LIMIT);
@@ -970,6 +993,7 @@ export function DashmarketDashboard() {
       const grossAmount = numberFromDb(row.gross_amount);
       const orderGrossAmount = numberFromDb(order?.gross_amount);
       const orderTaxAmount = numberFromDb(order?.taxes_amount);
+      const shippingAmounts = getOrderItemShippingAmounts(row);
       const allocatedTaxAmount =
         orderGrossAmount > 0 ? orderTaxAmount * (grossAmount / orderGrossAmount) : 0;
       const current =
@@ -990,7 +1014,7 @@ export function DashmarketDashboard() {
       current.orders += 1;
       current.grossRevenue += grossAmount;
       current.marketplaceFees += numberFromDb(row.marketplace_fee_amount);
-      current.shippingCosts += numberFromDb(row.shipping_cost_amount);
+      current.shippingCosts += shippingAmounts.seller;
       current.discounts += numberFromDb(row.discount_amount);
       current.taxes += allocatedTaxAmount;
       salesBySku.set(sku, current);
@@ -1007,8 +1031,8 @@ export function DashmarketDashboard() {
         quantity: numberFromDb(row.quantity),
         grossAmount,
         marketplaceFee: numberFromDb(row.marketplace_fee_amount),
-        shippingBuyer: 0,
-        shippingSeller: numberFromDb(row.shipping_cost_amount),
+        shippingBuyer: shippingAmounts.buyer,
+        shippingSeller: shippingAmounts.seller,
         discountAmount: numberFromDb(row.discount_amount),
         orderTaxAmount: allocatedTaxAmount
       });
@@ -2321,7 +2345,7 @@ export function DashmarketDashboard() {
                         <th className="px-4 py-3 text-clay">Custo (-)</th>
                         <th className="px-4 py-3 text-berry">Imposto (-)</th>
                         <th className="px-4 py-3 text-clay">Tarifa venda (-)</th>
-                        <th className="px-4 py-3">Frete comprador (-)</th>
+                        <th className="px-4 py-3">Frete comprador</th>
                         <th className="px-4 py-3 text-sky-700">Frete vendedor (-)</th>
                         <th className="px-4 py-3 text-sea">Margem contrib.</th>
                         <th className="px-4 py-3 text-sea">MC em %</th>
