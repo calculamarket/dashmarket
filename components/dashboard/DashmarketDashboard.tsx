@@ -112,6 +112,92 @@ type SyncPromotionsSummary = {
   syncedAt: string;
 };
 
+type AuditedOrderItem = {
+  sku: string | null;
+  title: string | null;
+  itemId?: string | null;
+  quantity: number;
+  unitPrice?: number;
+  grossAmount: number;
+  marketplaceFeeAmount?: number;
+  saleFee?: number;
+  sellerShippingAmount?: number;
+  buyerShippingAmount?: number;
+  discountAmount?: number;
+};
+
+type AuditedPayment = {
+  id: string | number | null;
+  status: string | null;
+  statusDetail: string | null;
+  transactionAmount: number;
+  totalPaidAmount: number;
+  shippingCost: number;
+  couponAmount: number;
+  dateCreated: string | null;
+  dateApproved: string | null;
+};
+
+type AuditedOrderResult = {
+  orderId: string;
+  local: {
+    status: string;
+    rawStatus: string | null;
+    soldAt: string;
+    grossAmount: number;
+    marketplaceFeeAmount: number;
+    sellerShippingAmount: number;
+    discountsAmount: number;
+    taxesAmount: number;
+    netAmount: number;
+    countsInRevenue: boolean;
+    items: AuditedOrderItem[];
+  } | null;
+  remote: {
+    status: string;
+    statusDetail: string | null;
+    shouldCountInRevenue: boolean;
+    fulfilled: boolean | null;
+    dateCreated: string | null;
+    dateClosed: string | null;
+    lastUpdated: string | null;
+    totalAmount: number;
+    paidAmount: number;
+    itemGrossAmount: number;
+    marketplaceFeeAmount: number;
+    sellerShippingAmount: number;
+    buyerShippingAmount: number;
+    shippingId: string | number | null;
+    shippingStatus: string | null;
+    shippingSubstatus: string | null;
+    taxesAmount: number;
+    tags: string[];
+    cancelDetail: unknown;
+    payments: AuditedPayment[];
+    items: AuditedOrderItem[];
+  } | null;
+  remoteError: { status: number; message: string } | null;
+  shipmentError: { status: number; message: string } | null;
+  comparison: {
+    revenueRisk: boolean;
+    statusMismatch: boolean;
+    localMissing: boolean;
+    remoteMissing: boolean;
+    grossMismatch: boolean;
+    feeMismatch: boolean;
+    sellerShippingMismatch: boolean;
+    taxMismatch: boolean;
+  };
+};
+
+type AuditOrdersResponse = {
+  checkedAt: string;
+  accountName: string;
+  sellerId: string;
+  lastSyncAt: string | null;
+  orders: AuditedOrderResult[];
+};
+
 type ApiErrorPayload = {
   error?: string;
   message?: string;
@@ -986,6 +1072,13 @@ export function DashmarketDashboard() {
     dateTo: dateOnly(new Date()),
     sku: ""
   });
+  const [auditOrderIds, setAuditOrderIds] = useState(
+    "2000016368899132\n2000016311935754\n2000016307367738"
+  );
+  const [auditResults, setAuditResults] = useState<AuditOrdersResponse | null>(
+    null
+  );
+  const [isAuditingOrders, setIsAuditingOrders] = useState(false);
 
   const activeSales = realSales.length > 0 ? realSales : salesSeed;
   const activeAdvertising =
@@ -2142,6 +2235,7 @@ export function DashmarketDashboard() {
     setInventorySyncSummary(null);
     setAdvertisingSyncSummary(null);
     setPromotionsSyncSummary(null);
+    setAuditResults(null);
     setCosts(costsSeed);
     setHiddenSkus([]);
     setEditingCostId(null);
@@ -2293,6 +2387,79 @@ export function DashmarketDashboard() {
       );
     } finally {
       setIsSyncingOrders(false);
+    }
+  }
+
+  async function auditMercadoLivreOrders() {
+    if (!supabaseClient || !organization) {
+      setDataMessage("Entre no DASHMARKET antes de auditar vendas.");
+      return;
+    }
+
+    const orderIds = Array.from(
+      new Set(
+        auditOrderIds
+          .split(/[\s,;]+/)
+          .map((orderId) => orderId.trim())
+          .filter(Boolean)
+      )
+    );
+
+    if (orderIds.length === 0) {
+      setDataMessage("Informe ao menos um numero de venda para auditar.");
+      return;
+    }
+
+    setIsAuditingOrders(true);
+    setDataMessage(null);
+
+    try {
+      const { data: sessionData, error: sessionError } =
+        await supabaseClient.auth.getSession();
+
+      if (sessionError) throw sessionError;
+
+      const accessToken = sessionData.session?.access_token;
+      if (!accessToken) throw new Error("Sessao expirada. Entre novamente.");
+
+      const response = await fetch("/api/marketplaces/mercadolivre/audit-orders", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          organizationId: organization.id,
+          orderIds
+        })
+      });
+      const payload = await readApiPayload<AuditOrdersResponse>(response);
+
+      if (!response.ok) {
+        throw new Error(
+          apiErrorMessage(payload, "Nao foi possivel auditar as vendas.")
+        );
+      }
+
+      const auditPayload = payload as AuditOrdersResponse;
+      const riskyOrders = auditPayload.orders.filter(
+        (order) => order.comparison.revenueRisk
+      );
+
+      setAuditResults(auditPayload);
+      setDataMessage(
+        riskyOrders.length > 0
+          ? `${riskyOrders.length} venda(s) precisam de ajuste no faturamento.`
+          : "Auditoria concluida sem risco de faturamento nesses pedidos."
+      );
+    } catch (error) {
+      setDataMessage(
+        error instanceof Error
+          ? error.message
+          : "Nao foi possivel auditar as vendas."
+      );
+    } finally {
+      setIsAuditingOrders(false);
     }
   }
 
@@ -3072,6 +3239,198 @@ export function DashmarketDashboard() {
                     </span>
                   </label>
                 </div>
+              </section>
+
+              <section className="rounded-lg border border-black/10 bg-white p-4 shadow-sm">
+                <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+                  <div>
+                    <h2 className="text-lg font-bold">
+                      Auditoria Mercado Livre
+                    </h2>
+                    <p className="text-sm text-black/60">
+                      Compare vendas canceladas na API com o faturamento salvo no DASHMARKET.
+                    </p>
+                  </div>
+                  <button
+                    className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-ink px-4 text-sm font-bold text-white hover:bg-black disabled:cursor-not-allowed disabled:bg-black/35"
+                    disabled={
+                      supabaseStatus !== "connected" ||
+                      !mercadoLivreAccount ||
+                      isAuditingOrders
+                    }
+                    onClick={auditMercadoLivreOrders}
+                    type="button"
+                  >
+                    <Search aria-hidden className="h-4 w-4" />
+                    {isAuditingOrders ? "Auditando" : "Auditar vendas"}
+                  </button>
+                </div>
+
+                <label className="mt-4 grid gap-1 text-sm font-semibold">
+                  Numeros das vendas
+                  <textarea
+                    className="min-h-24 rounded-lg border border-black/10 bg-paper px-3 py-2 font-normal outline-none focus:ring-4 focus:ring-sea/20"
+                    onChange={(event) => setAuditOrderIds(event.target.value)}
+                    placeholder="Cole um numero por linha"
+                    value={auditOrderIds}
+                  />
+                </label>
+
+                {auditResults && (
+                  <div className="mt-4 grid gap-3">
+                    <div className="grid gap-2 text-sm md:grid-cols-3">
+                      <div className="rounded-lg bg-paper p-3 ring-1 ring-black/10">
+                        <p className="text-xs font-bold uppercase tracking-normal text-black/45">
+                          Conta auditada
+                        </p>
+                        <p className="mt-1 font-semibold text-ink">
+                          {auditResults.accountName}
+                        </p>
+                      </div>
+                      <div className="rounded-lg bg-paper p-3 ring-1 ring-black/10">
+                        <p className="text-xs font-bold uppercase tracking-normal text-black/45">
+                          Ultima sincronizacao
+                        </p>
+                        <p className="mt-1 font-semibold text-ink">
+                          {auditResults.lastSyncAt
+                            ? new Date(auditResults.lastSyncAt).toLocaleString(
+                                "pt-BR"
+                              )
+                            : "Sem registro"}
+                        </p>
+                      </div>
+                      <div className="rounded-lg bg-paper p-3 ring-1 ring-black/10">
+                        <p className="text-xs font-bold uppercase tracking-normal text-black/45">
+                          Verificacao
+                        </p>
+                        <p className="mt-1 font-semibold text-ink">
+                          {new Date(auditResults.checkedAt).toLocaleString("pt-BR")}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="table-scroll overflow-x-auto">
+                      <table className="min-w-[1180px] w-full text-left text-sm">
+                        <thead className="bg-black/[0.025] text-xs uppercase tracking-normal text-black/50">
+                          <tr>
+                            <th className="px-4 py-3">Venda</th>
+                            <th className="px-4 py-3">Status ML</th>
+                            <th className="px-4 py-3">Status DASH</th>
+                            <th className="px-4 py-3">Faturamento DASH</th>
+                            <th className="px-4 py-3">Total ML</th>
+                            <th className="px-4 py-3">Tarifa ML</th>
+                            <th className="px-4 py-3">Frete vendedor ML</th>
+                            <th className="px-4 py-3">Situacao</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-black/10">
+                          {auditResults.orders.map((order) => {
+                            const revenueRisk = order.comparison.revenueRisk;
+                            const mismatchCount = [
+                              order.comparison.statusMismatch,
+                              order.comparison.grossMismatch,
+                              order.comparison.feeMismatch,
+                              order.comparison.sellerShippingMismatch,
+                              order.comparison.taxMismatch
+                            ].filter(Boolean).length;
+
+                            return (
+                              <tr
+                                className={
+                                  revenueRisk ? "bg-rose-50/60" : undefined
+                                }
+                                key={order.orderId}
+                              >
+                                <td className="px-4 py-3 font-bold">
+                                  {order.orderId}
+                                  {order.remote?.lastUpdated && (
+                                    <p className="mt-1 text-xs font-normal text-black/45">
+                                      Atualizado ML{" "}
+                                      {new Date(
+                                        order.remote.lastUpdated
+                                      ).toLocaleString("pt-BR")}
+                                    </p>
+                                  )}
+                                </td>
+                                <td className="px-4 py-3">
+                                  {order.remote?.status ??
+                                    `Erro ${order.remoteError?.status ?? ""}`}
+                                  {order.remote?.payments.length ? (
+                                    <p className="mt-1 text-xs text-black/45">
+                                      Pagamento{" "}
+                                      {order.remote.payments
+                                        .map((payment) => payment.status)
+                                        .filter(Boolean)
+                                        .join(", ")}
+                                    </p>
+                                  ) : null}
+                                </td>
+                                <td className="px-4 py-3">
+                                  {order.local?.status ?? "Nao salvo"}
+                                  {order.local?.rawStatus &&
+                                    order.local.rawStatus !==
+                                      order.local.status && (
+                                      <p className="mt-1 text-xs text-black/45">
+                                        Raw {order.local.rawStatus}
+                                      </p>
+                                    )}
+                                </td>
+                                <td className="px-4 py-3 font-semibold">
+                                  {order.local
+                                    ? formatCurrency.format(order.local.grossAmount)
+                                    : "-"}
+                                </td>
+                                <td className="px-4 py-3">
+                                  {order.remote
+                                    ? formatCurrency.format(
+                                        order.remote.itemGrossAmount
+                                      )
+                                    : "-"}
+                                </td>
+                                <td className="px-4 py-3">
+                                  {order.remote
+                                    ? formatCurrency.format(
+                                        order.remote.marketplaceFeeAmount
+                                      )
+                                    : "-"}
+                                </td>
+                                <td className="px-4 py-3">
+                                  {order.remote
+                                    ? formatCurrency.format(
+                                        order.remote.sellerShippingAmount
+                                      )
+                                    : "-"}
+                                  {order.shipmentError && (
+                                    <p className="mt-1 text-xs text-berry">
+                                      Frete ML indisponivel
+                                    </p>
+                                  )}
+                                </td>
+                                <td className="px-4 py-3">
+                                  <span
+                                    className={`inline-flex rounded-lg px-2 py-1 text-xs font-bold ring-1 ${
+                                      revenueRisk
+                                        ? "bg-rose-100 text-berry ring-rose-200"
+                                        : mismatchCount > 0
+                                          ? "bg-amber-100 text-clay ring-amber-200"
+                                          : "bg-emerald-50 text-sea ring-emerald-100"
+                                    }`}
+                                  >
+                                    {revenueRisk
+                                      ? "Revisar faturamento"
+                                      : mismatchCount > 0
+                                        ? "Diferenca encontrada"
+                                        : "Conferido"}
+                                  </span>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
               </section>
 
               <section className="rounded-lg border border-black/10 bg-white shadow-sm">
