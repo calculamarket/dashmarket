@@ -138,7 +138,6 @@ type OrderItemRow = {
   shipping_cost_amount: number | string;
   discount_amount: number | string;
   orders?: OrderRelationRow | OrderRelationRow[] | null;
-  marketplace_listings?: ListingRelationRow | ListingRelationRow[] | null;
 };
 
 type OrderRelationRow = {
@@ -147,15 +146,6 @@ type OrderRelationRow = {
   status: string;
   gross_amount: number | string;
   taxes_amount: number | string;
-  marketplace_accounts?: MarketplaceAccountNameRow | MarketplaceAccountNameRow[] | null;
-};
-
-type MarketplaceAccountNameRow = {
-  account_name: string;
-};
-
-type ListingRelationRow = {
-  fulfillment_type: string | null;
 };
 
 type SalesDetailSourceRow = {
@@ -163,11 +153,9 @@ type SalesDetailSourceRow = {
   orderId: string;
   externalItemId: string;
   title: string;
-  accountName: string;
   sku: string;
   soldAt: string;
   status: string;
-  fulfillment: string;
   unitPrice: number;
   quantity: number;
   grossAmount: number;
@@ -436,6 +424,8 @@ const views: Array<{ key: ViewKey; label: string; icon: typeof BarChart3 }> = [
   { key: "ads", label: "Publicidade", icon: Megaphone }
 ];
 
+const SALES_DETAIL_LIMIT = 10000;
+
 const formatCurrency = new Intl.NumberFormat("pt-BR", {
   style: "currency",
   currency: "BRL"
@@ -537,22 +527,6 @@ function getRelatedOrder(row: OrderItemRow) {
   return row.orders ?? null;
 }
 
-function getRelatedAccount(row: OrderRelationRow | null) {
-  if (Array.isArray(row?.marketplace_accounts)) {
-    return row.marketplace_accounts[0] ?? null;
-  }
-
-  return row?.marketplace_accounts ?? null;
-}
-
-function getRelatedListing(row: OrderItemRow) {
-  if (Array.isArray(row.marketplace_listings)) {
-    return row.marketplace_listings[0] ?? null;
-  }
-
-  return row.marketplace_listings ?? null;
-}
-
 function mapCostCenterRow(row: CostCenterRow): SkuCost | null {
   const product = getRelatedProduct(row);
   if (!product) return null;
@@ -622,6 +596,20 @@ function daysAgo(days: number) {
   const value = new Date();
   value.setDate(value.getDate() - days);
   return dateOnly(value);
+}
+
+function daysBackFromDate(dateValue: string) {
+  if (!dateValue) return 365;
+
+  const selectedDate = new Date(`${dateValue}T00:00:00`);
+  if (Number.isNaN(selectedDate.getTime())) return 365;
+
+  const today = new Date(`${dateOnly(new Date())}T00:00:00`);
+  const diffInDays = Math.ceil(
+    (today.getTime() - selectedDate.getTime()) / (24 * 60 * 60 * 1000)
+  );
+
+  return Math.min(Math.max(diffInDays + 1, 1), 365);
 }
 
 function calculateCostForDetail(cost: SkuCost, sale: SalesDetailSourceRow) {
@@ -797,11 +785,9 @@ export function DashmarketDashboard() {
             orderId: `DEMO-${index + 1}`,
             externalItemId: sale.sku,
             title: sale.title,
-            accountName: organization?.name ?? "DASHMARKET",
             sku: sale.sku,
             soldAt: new Date().toISOString(),
             status: "paid",
-            fulfillment: index === 3 ? "Flex" : "Full",
             unitPrice: sale.units > 0 ? sale.grossRevenue / sale.units : 0,
             quantity: sale.units,
             grossAmount: sale.grossRevenue,
@@ -811,7 +797,7 @@ export function DashmarketDashboard() {
             discountAmount: sale.discounts,
             orderTaxAmount: sale.taxes
           })),
-    [organization?.name, realSaleDetails]
+    [realSaleDetails]
   );
   const salesDetailRows = useMemo<SalesDetailRow[]>(
     () =>
@@ -968,10 +954,10 @@ export function DashmarketDashboard() {
     const { data, error } = await supabaseClient
       .from("order_items")
       .select(
-        "id, external_item_id, seller_sku, title, quantity, unit_price, gross_amount, marketplace_fee_amount, shipping_cost_amount, discount_amount, orders(provider_order_id, sold_at, status, gross_amount, taxes_amount, marketplace_accounts(account_name)), marketplace_listings(fulfillment_type)"
+        "id, external_item_id, seller_sku, title, quantity, unit_price, gross_amount, marketplace_fee_amount, shipping_cost_amount, discount_amount, orders(provider_order_id, sold_at, status, gross_amount, taxes_amount)"
       )
       .eq("organization_id", organizationId)
-      .limit(2000);
+      .limit(SALES_DETAIL_LIMIT);
 
     if (error) throw error;
 
@@ -981,8 +967,6 @@ export function DashmarketDashboard() {
     for (const row of (data ?? []) as OrderItemRow[]) {
       const sku = row.seller_sku ?? "SKU sem codigo";
       const order = getRelatedOrder(row);
-      const account = getRelatedAccount(order);
-      const listing = getRelatedListing(row);
       const grossAmount = numberFromDb(row.gross_amount);
       const orderGrossAmount = numberFromDb(order?.gross_amount);
       const orderTaxAmount = numberFromDb(order?.taxes_amount);
@@ -1016,11 +1000,9 @@ export function DashmarketDashboard() {
         orderId: order?.provider_order_id ?? "Pedido sem codigo",
         externalItemId: row.external_item_id ?? sku,
         title: row.title,
-        accountName: account?.account_name ?? "Mercado Livre",
         sku,
         soldAt: order?.sold_at ?? new Date().toISOString(),
         status: order?.status ?? "paid",
-        fulfillment: channelLabel(listing?.fulfillment_type ?? "marketplace"),
         unitPrice: numberFromDb(row.unit_price),
         quantity: numberFromDb(row.quantity),
         grossAmount,
@@ -1503,7 +1485,10 @@ export function DashmarketDashboard() {
           authorization: `Bearer ${accessToken}`,
           "content-type": "application/json"
         },
-        body: JSON.stringify({ organizationId: organization.id, daysBack: 30 })
+        body: JSON.stringify({
+          organizationId: organization.id,
+          daysBack: daysBackFromDate(salesFilters.dateFrom)
+        })
       });
 
       const payload = (await response.json()) as
@@ -2245,7 +2230,7 @@ export function DashmarketDashboard() {
                   <div>
                     <h2 className="text-lg font-bold">Filtrar vendas</h2>
                     <p className="text-sm text-black/60">
-                      Consulte por periodo, SKU, titulo, pedido ou MLB.
+                      Consulte por periodo, SKU, titulo, numero da venda ou MLB.
                     </p>
                   </div>
                   {mercadoLivreAccount && (
@@ -2293,7 +2278,7 @@ export function DashmarketDashboard() {
                     />
                   </label>
                   <label className="grid gap-1 text-sm font-semibold">
-                    SKU, titulo ou pedido
+                    SKU, titulo ou numero da venda
                     <span className="relative">
                       <Search
                         aria-hidden
@@ -2307,7 +2292,7 @@ export function DashmarketDashboard() {
                             sku: event.target.value
                           }))
                         }
-                        placeholder="Buscar SKU, titulo, MLB ou pedido"
+                        placeholder="Buscar SKU, titulo, MLB ou numero da venda"
                         value={salesFilters.sku}
                       />
                     </span>
@@ -2323,14 +2308,13 @@ export function DashmarketDashboard() {
                   </p>
                 </div>
                 <div className="table-scroll overflow-x-auto">
-                  <table className="min-w-[1540px] w-full text-left text-sm">
+                  <table className="min-w-[1440px] w-full text-left text-sm">
                     <thead className="bg-black/[0.025] text-xs uppercase tracking-normal text-black/50">
                       <tr>
                         <th className="px-4 py-3">Anuncio</th>
-                        <th className="px-4 py-3">Conta</th>
+                        <th className="px-4 py-3">Numero da venda</th>
                         <th className="px-4 py-3">SKU</th>
                         <th className="px-4 py-3">Data</th>
-                        <th className="px-4 py-3">Frete</th>
                         <th className="px-4 py-3">Valor unit.</th>
                         <th className="px-4 py-3">Qtd.</th>
                         <th className="px-4 py-3">Faturamento ML</th>
@@ -2349,15 +2333,16 @@ export function DashmarketDashboard() {
                           <td className="px-4 py-3">
                             <p className="font-semibold text-ink">{sale.title}</p>
                             <p className="text-xs text-black/45">
-                              {sale.externalItemId} | Pedido {sale.orderId}
+                              {sale.externalItemId}
                             </p>
                           </td>
-                          <td className="px-4 py-3">{sale.accountName}</td>
+                          <td className="px-4 py-3 font-semibold">
+                            {sale.orderId}
+                          </td>
                           <td className="px-4 py-3 font-bold">{sale.sku}</td>
                           <td className="px-4 py-3">
                             {new Date(sale.soldAt).toLocaleDateString("pt-BR")}
                           </td>
-                          <td className="px-4 py-3">{sale.fulfillment}</td>
                           <td className="px-4 py-3">
                             {formatCurrency.format(sale.unitPrice)}
                           </td>
@@ -2404,7 +2389,7 @@ export function DashmarketDashboard() {
                         <tr>
                           <td
                             className="px-4 py-8 text-center text-black/55"
-                            colSpan={15}
+                            colSpan={14}
                           >
                             Nenhuma venda encontrada para este filtro.
                           </td>

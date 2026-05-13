@@ -121,7 +121,7 @@ type NormalizedOrder = {
   rawPayload: MercadoLivreOrder;
 };
 
-const MAX_ORDERS_PER_SYNC = 200;
+const MAX_ORDERS_PER_SYNC = 10000;
 const ORDERS_PAGE_SIZE = 50;
 const DEFAULT_DAYS_BACK = 30;
 
@@ -355,7 +355,7 @@ export async function POST(request: Request) {
     const organizationId = body.organizationId;
     const daysBack =
       typeof body.daysBack === "number" && body.daysBack > 0
-        ? Math.min(Math.floor(body.daysBack), 90)
+        ? Math.min(Math.floor(body.daysBack), 365)
         : DEFAULT_DAYS_BACK;
 
     if (!token || !organizationId) {
