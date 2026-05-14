@@ -111,6 +111,27 @@ type CampaignRow = {
   provider_campaign_id: string;
 };
 
+type AdvertisingMetricUpsert = {
+  organization_id: string;
+  campaign_id: string;
+  product_id: string;
+  metric_date: string;
+  impressions: number;
+  clicks: number;
+  ad_spend_amount: number;
+  attributed_revenue_amount: number;
+  attributed_orders: number;
+  acos: number | null;
+  raw_payload: {
+    advertiser: Advertiser;
+    advertiser_site_id: string;
+    date_from: string;
+    date_to: string;
+    ads: ProductAdsItem[];
+    merged_rows: number;
+  };
+};
+
 const DEFAULT_DAYS_BACK = 30;
 const PAGE_SIZE = 50;
 const METRICS = [
@@ -675,7 +696,7 @@ export async function POST(request: Request) {
           product.id
         ])
       );
-      const metricRows = ads
+      const rawMetricRows = ads
         .map((ad) => {
           const campaignId = ad.campaign_id
             ? campaignsByProviderId.get(String(ad.campaign_id))
@@ -713,11 +734,37 @@ export async function POST(request: Request) {
               advertiser_site_id: advertiserSiteId,
               date_from: dateFrom,
               date_to: dateTo,
-              ad
+              ads: [ad],
+              merged_rows: 1
             }
-          };
+          } satisfies AdvertisingMetricUpsert;
         })
         .filter((row): row is NonNullable<typeof row> => Boolean(row));
+      const metricRowsByKey = new Map<string, AdvertisingMetricUpsert>();
+
+      for (const row of rawMetricRows) {
+        const key = `${row.campaign_id}:${row.product_id}:${row.metric_date}`;
+        const current = metricRowsByKey.get(key);
+
+        if (!current) {
+          metricRowsByKey.set(key, row);
+          continue;
+        }
+
+        current.impressions += row.impressions;
+        current.clicks += row.clicks;
+        current.ad_spend_amount += row.ad_spend_amount;
+        current.attributed_revenue_amount += row.attributed_revenue_amount;
+        current.attributed_orders += row.attributed_orders;
+        current.acos =
+          current.attributed_revenue_amount > 0
+            ? current.ad_spend_amount / current.attributed_revenue_amount
+            : current.acos ?? row.acos;
+        current.raw_payload.ads.push(...row.raw_payload.ads);
+        current.raw_payload.merged_rows += row.raw_payload.merged_rows;
+      }
+
+      const metricRows = Array.from(metricRowsByKey.values());
 
       if (metricRows.length > 0) {
         const { error: metricsUpsertError } = await supabase
