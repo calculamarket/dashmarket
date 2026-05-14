@@ -173,12 +173,14 @@ function parseMercadoAdsError(status: number, path: string, body: string) {
 
   try {
     const parsed = JSON.parse(body) as {
+      description?: string;
       error?: string;
       message?: string;
       cause?: Array<{ message?: string }>;
     };
     apiMessage =
       parsed.message ??
+      parsed.description ??
       parsed.error ??
       parsed.cause?.map((cause) => cause.message).filter(Boolean).join("; ") ??
       apiMessage;
@@ -303,29 +305,6 @@ async function mercadoAdsRequest<T>(
   return response.json() as Promise<T>;
 }
 
-async function mercadoAdsRequestWithFallback<T>(
-  paths: string[],
-  accessToken: string,
-  apiVersion: "1" | "2"
-) {
-  let lastError: unknown;
-
-  for (const path of paths) {
-    try {
-      return await mercadoAdsRequest<T>(path, accessToken, apiVersion);
-    } catch (error) {
-      lastError = error;
-      if (!(error instanceof MercadoAdsApiError) || ![404, 405].includes(error.status)) {
-        throw error;
-      }
-    }
-  }
-
-  throw lastError instanceof Error
-    ? lastError
-    : new Error("Nao foi possivel consultar o Mercado Ads.");
-}
-
 async function getAdvertiser(
   accessToken: string,
   siteId: string | null
@@ -361,16 +340,11 @@ async function fetchCampaigns(
       offset: String(offset),
       date_from: dateFrom,
       date_to: dateTo,
-      metrics: METRICS,
-      metrics_summary: "true"
+      metrics: METRICS
     });
 
-    const payload = await mercadoAdsRequestWithFallback<ProductAdsCampaignsResponse>(
-      [
-        `/advertising/${advertiserSiteId}/advertisers/${advertiserId}/product_ads/campaigns/search?${params.toString()}`,
-        `/marketplace/advertising/${advertiserSiteId}/advertisers/${advertiserId}/product_ads/campaigns/search?${params.toString()}`,
-        `/advertising/advertisers/${advertiserId}/product_ads/campaigns?${params.toString()}`
-      ],
+    const payload = await mercadoAdsRequest<ProductAdsCampaignsResponse>(
+      `/advertising/${advertiserSiteId}/advertisers/${advertiserId}/product_ads/campaigns/search?${params.toString()}`,
       accessToken,
       "2"
     );
@@ -401,16 +375,11 @@ async function fetchAds(
       offset: String(offset),
       date_from: dateFrom,
       date_to: dateTo,
-      metrics: METRICS,
-      metrics_summary: "true"
+      metrics: METRICS
     });
 
-    const payload = await mercadoAdsRequestWithFallback<ProductAdsItemsResponse>(
-      [
-        `/advertising/${advertiserSiteId}/advertisers/${advertiserId}/product_ads/ads/search?${params.toString()}`,
-        `/marketplace/advertising/${advertiserSiteId}/advertisers/${advertiserId}/product_ads/ads/search?${params.toString()}`,
-        `/advertising/advertisers/${advertiserId}/product_ads/items?${params.toString()}`
-      ],
+    const payload = await mercadoAdsRequest<ProductAdsItemsResponse>(
+      `/advertising/${advertiserSiteId}/advertisers/${advertiserId}/product_ads/ads/search?${params.toString()}`,
       accessToken,
       "2"
     );
@@ -554,13 +523,30 @@ export async function POST(request: Request) {
 
       const advertiserId = advertiser.advertiser_id;
       const advertiserSiteId = advertiser.site_id ?? currentAccount.site_id ?? "MLB";
-      const campaigns = await fetchCampaigns(
-        advertiserId,
-        advertiserSiteId,
-        accessToken,
-        dateFrom,
-        dateTo
-      );
+      const warnings: string[] = [];
+      let campaigns: ProductAdsCampaign[] = [];
+
+      try {
+        campaigns = await fetchCampaigns(
+          advertiserId,
+          advertiserSiteId,
+          accessToken,
+          dateFrom,
+          dateTo
+        );
+      } catch (error) {
+        if (
+          error instanceof MercadoAdsApiError &&
+          [400, 404, 405].includes(error.status)
+        ) {
+          warnings.push(
+            `Campanhas nao retornaram detalhes (${error.status}); metricas serao vinculadas pelos anuncios.`
+          );
+        } else {
+          throw error;
+        }
+      }
+
       const ads = await fetchAds(
         advertiserId,
         advertiserSiteId,
@@ -760,6 +746,7 @@ export async function POST(request: Request) {
             advertiser_id: advertiserId,
             advertiser_site_id: advertiserSiteId,
             days_back: daysBack,
+            warnings,
             campaigns: campaignIds.size,
             ads: ads.length,
             ad_spend_amount: metricRows.reduce(
@@ -783,6 +770,7 @@ export async function POST(request: Request) {
           (sum, metric) => sum + metric.attributed_revenue_amount,
           0
         ),
+        warnings,
         syncedAt: now
       });
     } catch (error) {

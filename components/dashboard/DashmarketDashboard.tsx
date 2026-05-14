@@ -100,12 +100,14 @@ type SyncInventorySummary = {
 type SyncAdvertisingSummary = {
   accountName: string;
   advertiserId: string | number;
+  advertiserSiteId?: string;
   daysBack: number;
   campaigns: number;
   ads: number;
   metrics: number;
   adSpend: number;
   attributedRevenue: number;
+  warnings?: string[];
   syncedAt: string;
 };
 
@@ -2745,7 +2747,9 @@ export function DashmarketDashboard() {
       const summary = payload as SyncAdvertisingSummary;
       setAdvertisingSyncSummary(summary);
       setDataMessage(
-        `Publicidade sincronizada: ${summary.metrics} metricas e ${summary.campaigns} campanhas.`
+        `Publicidade sincronizada: ${summary.metrics} metricas e ${summary.campaigns} campanhas.${
+          summary.warnings?.length ? ` Aviso: ${summary.warnings[0]}` : ""
+        }`
       );
       await loadAdvertising(organization.id);
       await loadMarketplaceAccounts(organization.id);
@@ -3239,31 +3243,41 @@ export function DashmarketDashboard() {
                 </div>
               )}
               {advertisingSyncSummary && (
-                <div className="mt-3 grid gap-2 sm:grid-cols-4">
-                  {[
-                    [
-                      "Campanhas",
-                      formatNumber.format(advertisingSyncSummary.campaigns)
-                    ],
-                    ["Anuncios", formatNumber.format(advertisingSyncSummary.ads)],
-                    [
-                      "Investimento",
-                      formatCurrency.format(advertisingSyncSummary.adSpend)
-                    ],
-                    [
-                      "Receita ads",
-                      formatCurrency.format(advertisingSyncSummary.attributedRevenue)
-                    ]
-                  ].map(([label, value]) => (
-                    <div
-                      className="rounded-lg bg-rose-50 px-3 py-2 ring-1 ring-rose-100"
-                      key={label}
+                <div className="mt-3 grid gap-2">
+                  <div className="grid gap-2 sm:grid-cols-4">
+                    {[
+                      [
+                        "Campanhas",
+                        formatNumber.format(advertisingSyncSummary.campaigns)
+                      ],
+                      ["Anuncios", formatNumber.format(advertisingSyncSummary.ads)],
+                      [
+                        "Investimento",
+                        formatCurrency.format(advertisingSyncSummary.adSpend)
+                      ],
+                      [
+                        "Receita ads",
+                        formatCurrency.format(advertisingSyncSummary.attributedRevenue)
+                      ]
+                    ].map(([label, value]) => (
+                      <div
+                        className="rounded-lg bg-rose-50 px-3 py-2 ring-1 ring-rose-100"
+                        key={label}
+                      >
+                        <p className="text-xs font-bold uppercase tracking-normal text-black/45">
+                          {label}
+                        </p>
+                        <p className="mt-1 font-semibold text-ink">{value}</p>
+                      </div>
+                    ))}
+                  </div>
+                  {advertisingSyncSummary.warnings?.map((warning) => (
+                    <p
+                      className="rounded-lg bg-amber-50 px-3 py-2 text-sm font-semibold text-clay ring-1 ring-amber-100"
+                      key={warning}
                     >
-                      <p className="text-xs font-bold uppercase tracking-normal text-black/45">
-                        {label}
-                      </p>
-                      <p className="mt-1 font-semibold text-ink">{value}</p>
-                    </div>
+                      {warning}
+                    </p>
                   ))}
                 </div>
               )}
