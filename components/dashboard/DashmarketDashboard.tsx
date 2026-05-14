@@ -348,6 +348,7 @@ type ProductUnitRow = {
   title: string;
   units: number;
   orders: number;
+  grossRevenue: number;
   averagePrice: number;
   discountUnit: number;
   productCostUnit: number;
@@ -358,7 +359,10 @@ type ProductUnitRow = {
   taxUnit: number;
   marketplaceFeeUnit: number;
   shippingSellerUnit: number;
+  advertisingAmount: number;
   advertisingUnit: number;
+  attributedRevenue: number;
+  acosRate: number;
   tacosRate: number;
   totalCostUnit: number;
   contributionMarginUnit: number;
@@ -1365,12 +1369,22 @@ export function DashmarketDashboard() {
             units > 0 ? (sale?.marketplaceFees ?? 0) / units : 0;
           const shippingSellerUnit =
             units > 0 ? (sale?.shippingCosts ?? 0) / units : 0;
-          const advertisingAmount = activeAdvertising
-            .filter((record) => record.sku === product.sku)
-            .reduce((total, record) => total + record.amount, 0);
+          const advertisingRecords = activeAdvertising.filter(
+            (record) => record.sku === product.sku
+          );
+          const advertisingAmount = advertisingRecords.reduce(
+            (total, record) => total + record.amount,
+            0
+          );
+          const attributedRevenue = advertisingRecords.reduce(
+            (total, record) => total + record.attributedRevenue,
+            0
+          );
           const advertisingUnit = units > 0 ? advertisingAmount / units : 0;
           const tacosRate =
-            averagePrice > 0 ? advertisingUnit / averagePrice : 0;
+            grossRevenue > 0 ? advertisingAmount / grossRevenue : 0;
+          const acosRate =
+            attributedRevenue > 0 ? advertisingAmount / attributedRevenue : 0;
           const totalCostUnit =
             discountUnit +
             productCostUnit +
@@ -1392,6 +1406,7 @@ export function DashmarketDashboard() {
             title: product.title,
             units,
             orders,
+            grossRevenue,
             averagePrice,
             discountUnit,
             productCostUnit,
@@ -1402,7 +1417,10 @@ export function DashmarketDashboard() {
             taxUnit,
             marketplaceFeeUnit,
             shippingSellerUnit,
+            advertisingAmount,
             advertisingUnit,
+            attributedRevenue,
+            acosRate,
             tacosRate,
             totalCostUnit,
             contributionMarginUnit,
@@ -1436,7 +1454,10 @@ export function DashmarketDashboard() {
           products: totals.products + 1,
           productsWithSales: totals.productsWithSales + (product.hasSales ? 1 : 0),
           units: totals.units + product.units,
-          grossRevenue: totals.grossRevenue + product.averagePrice * product.units,
+          grossRevenue: totals.grossRevenue + product.grossRevenue,
+          advertisingAmount: totals.advertisingAmount + product.advertisingAmount,
+          attributedRevenue:
+            totals.attributedRevenue + product.attributedRevenue,
           totalCosts: totals.totalCosts + product.totalCostUnit * product.units,
           contributionMargin:
             totals.contributionMargin +
@@ -1447,6 +1468,8 @@ export function DashmarketDashboard() {
           productsWithSales: 0,
           units: 0,
           grossRevenue: 0,
+          advertisingAmount: 0,
+          attributedRevenue: 0,
           totalCosts: 0,
           contributionMargin: 0
         }
@@ -3364,19 +3387,105 @@ export function DashmarketDashboard() {
                   )}
                 />
                 <KpiCard
-                  detail="Publicidade dividida pelas unidades"
-                  icon={Megaphone}
-                  title="ADS medio unit."
-                  tone="berry"
-                  value={formatCurrency.format(
+                  detail={`ADS ${formatCurrency.format(
+                    productUnitTotals.advertisingAmount
+                  )} | ${formatCurrency.format(
                     productUnitTotals.units > 0
-                      ? activeAdvertising.reduce(
-                          (total, record) => total + record.amount,
-                          0
-                        ) / productUnitTotals.units
+                      ? productUnitTotals.advertisingAmount /
+                          productUnitTotals.units
+                      : 0
+                  )} por un.`}
+                  icon={Megaphone}
+                  title="TACOS medio"
+                  tone="berry"
+                  value={formatPercent(
+                    productUnitTotals.grossRevenue > 0
+                      ? productUnitTotals.advertisingAmount /
+                          productUnitTotals.grossRevenue
                       : 0
                   )}
                 />
+              </section>
+
+              <section className="rounded-lg border border-black/10 bg-white shadow-sm">
+                <div className="flex flex-col gap-3 border-b border-black/10 p-4 lg:flex-row lg:items-center lg:justify-between">
+                  <div>
+                    <h2 className="text-lg font-bold">TACOS por produto</h2>
+                    <p className="text-sm text-black/60">
+                      Investimento em ADS dividido pelo faturamento total de cada SKU.
+                    </p>
+                  </div>
+                  <span className="inline-flex h-8 items-center gap-2 rounded-lg bg-rose-50 px-3 text-sm font-semibold text-berry ring-1 ring-rose-100">
+                    <Megaphone aria-hidden className="h-4 w-4" />
+                    Custo publicitário por SKU
+                  </span>
+                </div>
+
+                <div className="table-scroll overflow-x-auto">
+                  <table className="min-w-[1180px] w-full text-left text-sm">
+                    <thead className="bg-black/[0.025] text-xs uppercase tracking-normal text-black/50">
+                      <tr>
+                        <th className="px-4 py-3">Produto</th>
+                        <th className="px-4 py-3">SKU</th>
+                        <th className="px-4 py-3">Faturamento</th>
+                        <th className="px-4 py-3 text-berry">Invest. ADS</th>
+                        <th className="px-4 py-3 text-berry">TACOS</th>
+                        <th className="px-4 py-3">ADS por un.</th>
+                        <th className="px-4 py-3">Receita atribuida</th>
+                        <th className="px-4 py-3">ACoS</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-black/10">
+                      {filteredProductUnitRows.map((product) => {
+                        const tacosTone =
+                          product.tacosRate > 0.15
+                            ? "text-berry"
+                            : product.tacosRate > 0.08
+                              ? "text-clay"
+                              : "text-sea";
+
+                        return (
+                          <tr className="hover:bg-black/[0.018]" key={product.sku}>
+                            <td className="px-4 py-3">
+                              <p className="font-semibold text-ink">
+                                {product.title}
+                              </p>
+                            </td>
+                            <td className="px-4 py-3 font-bold">{product.sku}</td>
+                            <td className="px-4 py-3">
+                              {product.hasSales
+                                ? formatCurrency.format(product.grossRevenue)
+                                : "-"}
+                            </td>
+                            <td className="px-4 py-3 font-semibold text-berry">
+                              {formatCurrency.format(product.advertisingAmount)}
+                            </td>
+                            <td className={`px-4 py-3 font-bold ${tacosTone}`}>
+                              {product.hasSales
+                                ? formatPercent(product.tacosRate)
+                                : "-"}
+                            </td>
+                            <td className="px-4 py-3">
+                              {product.units > 0
+                                ? formatCurrency.format(product.advertisingUnit)
+                                : "-"}
+                            </td>
+                            <td className="px-4 py-3">
+                              {product.attributedRevenue > 0
+                                ? formatCurrency.format(product.attributedRevenue)
+                                : "-"}
+                            </td>
+                            <td className="px-4 py-3">
+                              {product.acosRate > 0
+                                ? formatPercent(product.acosRate)
+                                : "-"}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               </section>
 
               <section className="rounded-lg border border-black/10 bg-white shadow-sm">
