@@ -11,6 +11,8 @@ import {
   LineChart,
   LogOut,
   Megaphone,
+  PanelLeftClose,
+  PanelLeftOpen,
   PackageCheck,
   PackagePlus,
   Pencil,
@@ -1035,6 +1037,7 @@ export function DashmarketDashboard() {
   const [selectedProvider, setSelectedProvider] =
     useState<MarketplaceProvider>("mercadolivre");
   const [activeView, setActiveView] = useState<ViewKey>("margem");
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [skuFilter, setSkuFilter] = useState("");
   const [costs, setCosts] = useState<SkuCost[]>(costsSeed);
   const [organization, setOrganization] = useState<Organization | null>(null);
@@ -1150,6 +1153,23 @@ export function DashmarketDashboard() {
   );
 
   useEffect(() => {
+    const savedPreference = window.localStorage.getItem(
+      "dashmarket:sidebar-collapsed"
+    );
+
+    if (savedPreference === "true") {
+      setIsSidebarCollapsed(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(
+      "dashmarket:sidebar-collapsed",
+      String(isSidebarCollapsed)
+    );
+  }, [isSidebarCollapsed]);
+
+  useEffect(() => {
     if (productOptions.length === 0) return;
 
     setCostForm((current) =>
@@ -1180,6 +1200,19 @@ export function DashmarketDashboard() {
     isSyncingInventory ||
     isSyncingAdvertising ||
     isSyncingPromotions;
+  const isMarketplaceActionDisabled =
+    selectedProvider !== "mercadolivre" ||
+    supabaseStatus !== "connected" ||
+    isSyncingMarketplace;
+  const isMarketplaceConnectDisabled =
+    isMarketplaceActionDisabled || isConnectingMarketplace;
+  const marketplaceSkuActionLabel = isConnectingMarketplace
+    ? "Conectando"
+    : isSyncingListings
+      ? "Sincronizando"
+      : mercadoLivreAccount
+        ? "Sincronizar SKUs"
+        : "Conectar Mercado Livre";
   const marginRows = useMemo(
     () => calculateContributionMargins(activeSales, costs, activeAdvertising),
     [activeAdvertising, activeSales, costs]
@@ -2867,61 +2900,120 @@ export function DashmarketDashboard() {
   return (
     <main className="min-h-screen bg-paper text-ink">
       <div className="flex min-h-screen flex-col lg:flex-row">
-        <aside className="border-b border-black/10 bg-ink px-4 py-4 text-white lg:min-h-screen lg:w-72 lg:border-b-0 lg:border-r">
-          <div className="flex items-center justify-between gap-4 lg:block">
-            <div>
-              <div className="flex items-center gap-3">
-                <span className="grid h-10 w-10 place-items-center rounded-lg bg-white text-sm font-black text-ink">
-                  DM
-                </span>
-                <div>
-                  <p className="text-lg font-black tracking-normal">DASHMARKET</p>
-                  <p className="text-xs text-white/60">Marketplace intelligence</p>
-                </div>
+        <aside
+          className={`border-b border-black/10 bg-ink px-4 py-4 text-white transition-[width,padding] duration-200 lg:min-h-screen lg:shrink-0 lg:border-b-0 lg:border-r ${
+            isSidebarCollapsed ? "lg:w-20 lg:px-3" : "lg:w-72 lg:px-4"
+          }`}
+        >
+          <div
+            className={`flex items-center justify-between gap-3 ${
+              isSidebarCollapsed ? "lg:flex-col" : ""
+            }`}
+          >
+            <div
+              className={`flex items-center gap-3 ${
+                isSidebarCollapsed ? "lg:justify-center" : ""
+              }`}
+            >
+              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-white text-sm font-black text-ink">
+                DM
+              </span>
+              <div className={isSidebarCollapsed ? "lg:hidden" : ""}>
+                <p className="text-lg font-black tracking-normal">DASHMARKET</p>
+                <p className="text-xs text-white/60">Marketplace intelligence</p>
               </div>
             </div>
-            {supabaseStatus === "connected" ? (
+
+            <div
+              className={`flex items-center gap-2 ${
+                isSidebarCollapsed ? "lg:flex-col" : ""
+              }`}
+            >
               <button
-                className="inline-flex h-9 items-center gap-2 rounded-lg bg-white/10 px-3 text-sm font-semibold text-white ring-1 ring-white/20 hover:bg-white/20 lg:mt-6"
-                onClick={signOut}
+                aria-label={isSidebarCollapsed ? "Expandir menu" : "Recolher menu"}
+                aria-pressed={isSidebarCollapsed}
+                className="hidden h-9 w-9 place-items-center rounded-lg bg-white/10 text-white ring-1 ring-white/20 hover:bg-white/20 lg:grid"
+                onClick={() => setIsSidebarCollapsed((current) => !current)}
+                title={isSidebarCollapsed ? "Expandir menu" : "Recolher menu"}
                 type="button"
               >
-                <LogOut aria-hidden className="h-4 w-4" />
-                Sair
+                {isSidebarCollapsed ? (
+                  <PanelLeftOpen aria-hidden className="h-4 w-4" />
+                ) : (
+                  <PanelLeftClose aria-hidden className="h-4 w-4" />
+                )}
               </button>
-            ) : (
-              <Link
-                className="inline-flex h-9 items-center gap-2 rounded-lg bg-white/10 px-3 text-sm font-semibold text-white ring-1 ring-white/20 hover:bg-white/20 lg:mt-6"
-                href="/login"
-              >
-                <ShieldCheck aria-hidden className="h-4 w-4" />
-                Entrar
-              </Link>
-            )}
+
+              {supabaseStatus === "connected" ? (
+                <button
+                  aria-label="Sair"
+                  className={`inline-flex h-9 items-center gap-2 rounded-lg bg-white/10 px-3 text-sm font-semibold text-white ring-1 ring-white/20 hover:bg-white/20 ${
+                    isSidebarCollapsed ? "lg:w-9 lg:justify-center lg:px-0" : ""
+                  }`}
+                  onClick={signOut}
+                  title="Sair"
+                  type="button"
+                >
+                  <LogOut aria-hidden className="h-4 w-4 shrink-0" />
+                  <span className={isSidebarCollapsed ? "lg:hidden" : ""}>Sair</span>
+                </button>
+              ) : (
+                <Link
+                  aria-label="Entrar"
+                  className={`inline-flex h-9 items-center gap-2 rounded-lg bg-white/10 px-3 text-sm font-semibold text-white ring-1 ring-white/20 hover:bg-white/20 ${
+                    isSidebarCollapsed ? "lg:w-9 lg:justify-center lg:px-0" : ""
+                  }`}
+                  href="/login"
+                  title="Entrar"
+                >
+                  <ShieldCheck aria-hidden className="h-4 w-4 shrink-0" />
+                  <span className={isSidebarCollapsed ? "lg:hidden" : ""}>
+                    Entrar
+                  </span>
+                </Link>
+              )}
+            </div>
           </div>
 
-          <nav className="mt-5 grid grid-cols-2 gap-2 lg:grid-cols-1">
+          <nav
+            className={`mt-5 grid grid-cols-2 gap-2 lg:grid-cols-1 ${
+              isSidebarCollapsed ? "lg:justify-items-center" : ""
+            }`}
+          >
             {views.map((view) => {
               const Icon = view.icon;
               return (
                 <button
+                  aria-label={view.label}
                   className={`flex h-10 items-center gap-2 rounded-lg px-3 text-left text-sm font-semibold transition ${
                     activeView === view.key
                       ? "bg-white text-ink"
                       : "bg-white/10 text-white/70 hover:bg-white/20"
+                  } ${
+                    isSidebarCollapsed
+                      ? "lg:w-10 lg:justify-center lg:gap-0 lg:px-0"
+                      : ""
                   }`}
                   key={view.key}
                   onClick={() => setActiveView(view.key)}
+                  title={view.label}
                   type="button"
                 >
-                  <Icon aria-hidden className="h-4 w-4" />
-                  {view.label}
+                  <Icon aria-hidden className="h-4 w-4 shrink-0" />
+                  <span className={isSidebarCollapsed ? "lg:hidden" : ""}>
+                    {view.label}
+                  </span>
                 </button>
               );
             })}
           </nav>
 
-          <section className="mt-6 rounded-lg border border-white/10 bg-white/10 p-4">
+          <section
+            className={`mt-6 rounded-lg border border-white/10 bg-white/10 ${
+              isSidebarCollapsed ? "p-4 lg:p-2" : "p-4"
+            }`}
+          >
+            <div className={isSidebarCollapsed ? "lg:hidden" : ""}>
             <div className="flex items-center gap-2 text-sm font-semibold">
               <Cable aria-hidden className="h-4 w-4 text-teal-200" />
               Conector ativo
@@ -2963,34 +3055,19 @@ export function DashmarketDashboard() {
             </div>
             <button
               className="mt-4 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-white px-3 text-sm font-bold text-ink hover:bg-paper"
-              disabled={
-                selectedProvider !== "mercadolivre" ||
-                supabaseStatus !== "connected" ||
-                isConnectingMarketplace ||
-                isSyncingMarketplace
-              }
+              disabled={isMarketplaceConnectDisabled}
               onClick={
                 mercadoLivreAccount ? syncMercadoLivreListings : connectMercadoLivre
               }
               type="button"
             >
               <Cable aria-hidden className="h-4 w-4" />
-              {isConnectingMarketplace
-                ? "Conectando"
-                : isSyncingListings
-                  ? "Sincronizando"
-                  : mercadoLivreAccount
-                    ? "Sincronizar SKUs"
-                    : "Conectar Mercado Livre"}
+              {marketplaceSkuActionLabel}
             </button>
             {mercadoLivreAccount && (
               <button
                 className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-teal-200 px-3 text-sm font-bold text-ink hover:bg-teal-100"
-                disabled={
-                  selectedProvider !== "mercadolivre" ||
-                  supabaseStatus !== "connected" ||
-                  isSyncingMarketplace
-                }
+                disabled={isMarketplaceActionDisabled}
                 onClick={syncMercadoLivreOrders}
                 type="button"
               >
@@ -3001,11 +3078,7 @@ export function DashmarketDashboard() {
             {mercadoLivreAccount && (
               <button
                 className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-white/10 px-3 text-sm font-bold text-white ring-1 ring-white/20 hover:bg-white/20"
-                disabled={
-                  selectedProvider !== "mercadolivre" ||
-                  supabaseStatus !== "connected" ||
-                  isSyncingMarketplace
-                }
+                disabled={isMarketplaceActionDisabled}
                 onClick={syncMercadoLivreInventory}
                 type="button"
               >
@@ -3016,11 +3089,7 @@ export function DashmarketDashboard() {
             {mercadoLivreAccount && (
               <button
                 className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-white/10 px-3 text-sm font-bold text-white ring-1 ring-white/20 hover:bg-white/20"
-                disabled={
-                  selectedProvider !== "mercadolivre" ||
-                  supabaseStatus !== "connected" ||
-                  isSyncingMarketplace
-                }
+                disabled={isMarketplaceActionDisabled}
                 onClick={syncMercadoLivreAdvertising}
                 type="button"
               >
@@ -3031,11 +3100,7 @@ export function DashmarketDashboard() {
             {mercadoLivreAccount && (
               <button
                 className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-white/10 px-3 text-sm font-bold text-white ring-1 ring-white/20 hover:bg-white/20"
-                disabled={
-                  selectedProvider !== "mercadolivre" ||
-                  supabaseStatus !== "connected" ||
-                  isSyncingMarketplace
-                }
+                disabled={isMarketplaceActionDisabled}
                 onClick={syncMercadoLivrePromotions}
                 type="button"
               >
@@ -3043,10 +3108,98 @@ export function DashmarketDashboard() {
                 {isSyncingPromotions ? "Sincronizando" : "Sincronizar Promoções"}
               </button>
             )}
+            </div>
+
+            <div className={`hidden gap-2 ${isSidebarCollapsed ? "lg:grid" : ""}`}>
+              <button
+                aria-label={marketplaceSkuActionLabel}
+                className="grid h-10 w-10 place-items-center rounded-lg bg-white text-ink hover:bg-paper disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={isMarketplaceConnectDisabled}
+                onClick={
+                  mercadoLivreAccount ? syncMercadoLivreListings : connectMercadoLivre
+                }
+                title={marketplaceSkuActionLabel}
+                type="button"
+              >
+                <Cable aria-hidden className="h-4 w-4" />
+              </button>
+              {mercadoLivreAccount && (
+                <button
+                  aria-label={
+                    isSyncingOrders ? "Sincronizando vendas" : "Sincronizar Vendas"
+                  }
+                  className="grid h-10 w-10 place-items-center rounded-lg bg-teal-200 text-ink hover:bg-teal-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={isMarketplaceActionDisabled}
+                  onClick={syncMercadoLivreOrders}
+                  title={
+                    isSyncingOrders ? "Sincronizando vendas" : "Sincronizar Vendas"
+                  }
+                  type="button"
+                >
+                  <ClipboardList aria-hidden className="h-4 w-4" />
+                </button>
+              )}
+              {mercadoLivreAccount && (
+                <button
+                  aria-label={
+                    isSyncingInventory
+                      ? "Sincronizando estoque"
+                      : "Sincronizar Estoque"
+                  }
+                  className="grid h-10 w-10 place-items-center rounded-lg bg-white/10 text-white ring-1 ring-white/20 hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={isMarketplaceActionDisabled}
+                  onClick={syncMercadoLivreInventory}
+                  title={
+                    isSyncingInventory
+                      ? "Sincronizando estoque"
+                      : "Sincronizar Estoque"
+                  }
+                  type="button"
+                >
+                  <Boxes aria-hidden className="h-4 w-4" />
+                </button>
+              )}
+              {mercadoLivreAccount && (
+                <button
+                  aria-label={
+                    isSyncingAdvertising ? "Sincronizando Ads" : "Sincronizar Ads"
+                  }
+                  className="grid h-10 w-10 place-items-center rounded-lg bg-white/10 text-white ring-1 ring-white/20 hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={isMarketplaceActionDisabled}
+                  onClick={syncMercadoLivreAdvertising}
+                  title={
+                    isSyncingAdvertising ? "Sincronizando Ads" : "Sincronizar Ads"
+                  }
+                  type="button"
+                >
+                  <Megaphone aria-hidden className="h-4 w-4" />
+                </button>
+              )}
+              {mercadoLivreAccount && (
+                <button
+                  aria-label={
+                    isSyncingPromotions
+                      ? "Sincronizando promocoes"
+                      : "Sincronizar Promoções"
+                  }
+                  className="grid h-10 w-10 place-items-center rounded-lg bg-white/10 text-white ring-1 ring-white/20 hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={isMarketplaceActionDisabled}
+                  onClick={syncMercadoLivrePromotions}
+                  title={
+                    isSyncingPromotions
+                      ? "Sincronizando promocoes"
+                      : "Sincronizar Promoções"
+                  }
+                  type="button"
+                >
+                  <Tags aria-hidden className="h-4 w-4" />
+                </button>
+              )}
+            </div>
           </section>
         </aside>
 
-        <section className="flex-1 px-4 py-5 sm:px-6 lg:px-8">
+        <section className="min-w-0 flex-1 px-4 py-5 sm:px-6 lg:px-8">
           <header className="flex flex-col gap-4 border-b border-black/10 pb-5 xl:flex-row xl:items-center xl:justify-between">
             <div>
               <p className="text-sm font-semibold uppercase tracking-normal text-black/50">
