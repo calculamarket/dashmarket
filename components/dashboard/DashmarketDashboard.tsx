@@ -961,6 +961,14 @@ function numberFromInput(value: string) {
   return Number.isFinite(numeric) ? numeric : 0;
 }
 
+function normalizeSearchText(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase()
+    .trim();
+}
+
 function inputNumber(value: number) {
   return value > 0 ? value.toFixed(2) : "";
 }
@@ -1398,6 +1406,9 @@ export function DashmarketDashboard() {
     validFrom: dateOnly(new Date())
   });
   const [costProductSearch, setCostProductSearch] = useState("");
+  const [companyFinanceSearch, setCompanyFinanceSearch] = useState("");
+  const [personalFinanceSearch, setPersonalFinanceSearch] = useState("");
+  const [personalLoanSearch, setPersonalLoanSearch] = useState("");
   const [editingProductSku, setEditingProductSku] = useState<string | null>(
     null
   );
@@ -1916,6 +1927,24 @@ export function DashmarketDashboard() {
     [calculatorForm, calculatorMode]
   );
 
+  const filteredCompanyFinanceEntries = useMemo(() => {
+    const query = normalizeSearchText(companyFinanceSearch);
+    if (!query) return companyFinanceEntries;
+
+    return companyFinanceEntries.filter((entry) =>
+      [
+        entry.title,
+        entry.category,
+        entry.paymentMethod,
+        entry.notes ?? "",
+        financeTypeLabel[entry.type],
+        financeStatusLabel[
+          resolveFinanceStatus(entry.status, entry.dueDate, entry.paidAt)
+        ]
+      ].some((value) => normalizeSearchText(value).includes(query))
+    );
+  }, [companyFinanceEntries, companyFinanceSearch]);
+
   const companyFinanceTotals = useMemo(
     () =>
       companyFinanceEntries.reduce(
@@ -1983,6 +2012,24 @@ export function DashmarketDashboard() {
       .sort((a, b) => b.income + b.expenses - (a.income + a.expenses));
   }, [companyFinanceEntries]);
 
+  const filteredPersonalFinanceEntries = useMemo(() => {
+    const query = normalizeSearchText(personalFinanceSearch);
+    if (!query) return personalFinanceEntries;
+
+    return personalFinanceEntries.filter((entry) =>
+      [
+        entry.title,
+        entry.category,
+        entry.paymentMethod,
+        entry.notes ?? "",
+        financeTypeLabel[entry.type],
+        financeStatusLabel[
+          resolveFinanceStatus(entry.status, entry.dueDate, entry.paidAt)
+        ]
+      ].some((value) => normalizeSearchText(value).includes(query))
+    );
+  }, [personalFinanceEntries, personalFinanceSearch]);
+
   const personalFinanceTotals = useMemo(
     () =>
       personalFinanceEntries.reduce(
@@ -2019,6 +2066,28 @@ export function DashmarketDashboard() {
       ),
     [personalFinanceEntries]
   );
+
+  const filteredPersonalLoans = useMemo(() => {
+    const query = normalizeSearchText(personalLoanSearch);
+    if (!query) return personalLoans;
+
+    return personalLoans.filter((loan) =>
+      [
+        loan.personName,
+        loan.description,
+        loan.notes ?? "",
+        loanDirectionLabel[loan.direction],
+        loanStatusLabel[
+          resolveLoanStatus(
+            loan.status,
+            loan.dueDate,
+            loan.principalAmount,
+            loan.paidAmount
+          )
+        ]
+      ].some((value) => normalizeSearchText(value).includes(query))
+    );
+  }, [personalLoanSearch, personalLoans]);
 
   const personalLoanTotals = useMemo(
     () =>
@@ -5474,10 +5543,26 @@ export function DashmarketDashboard() {
                         Controle simples de contas a pagar, a receber e realizado.
                       </p>
                     </div>
-                    <span className="inline-flex h-8 items-center gap-2 rounded-lg bg-emerald-50 px-3 text-sm font-semibold text-sea ring-1 ring-emerald-100">
-                      <CircleDollarSign aria-hidden className="h-4 w-4" />
-                      Fluxo de caixa
-                    </span>
+                    <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+                      <label className="relative block min-w-0 sm:w-80">
+                        <Search
+                          aria-hidden
+                          className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-black/40"
+                        />
+                        <input
+                          className="h-10 w-full rounded-lg border border-black/10 bg-paper pl-9 pr-3 text-sm outline-none focus:ring-4 focus:ring-sea/20"
+                          onChange={(event) =>
+                            setCompanyFinanceSearch(event.target.value)
+                          }
+                          placeholder="Buscar fornecedor, descricao ou categoria"
+                          value={companyFinanceSearch}
+                        />
+                      </label>
+                      <span className="inline-flex h-8 items-center gap-2 rounded-lg bg-emerald-50 px-3 text-sm font-semibold text-sea ring-1 ring-emerald-100">
+                        <CircleDollarSign aria-hidden className="h-4 w-4" />
+                        Fluxo de caixa
+                      </span>
+                    </div>
                   </div>
                   <div className="table-scroll overflow-x-auto">
                     <table className="min-w-[1060px] w-full text-left text-sm">
@@ -5494,7 +5579,7 @@ export function DashmarketDashboard() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-black/10">
-                        {companyFinanceEntries.map((entry) => {
+                        {filteredCompanyFinanceEntries.map((entry) => {
                           const status = resolveFinanceStatus(
                             entry.status,
                             entry.dueDate,
@@ -5566,13 +5651,13 @@ export function DashmarketDashboard() {
                             </tr>
                           );
                         })}
-                        {companyFinanceEntries.length === 0 && (
+                        {filteredCompanyFinanceEntries.length === 0 && (
                           <tr>
                             <td
                               className="px-4 py-8 text-center text-black/55"
                               colSpan={8}
                             >
-                              Nenhum lancamento financeiro cadastrado.
+                              Nenhum lancamento financeiro encontrado.
                             </td>
                           </tr>
                         )}
@@ -5860,11 +5945,27 @@ export function DashmarketDashboard() {
                     </form>
 
                     <section className="rounded-lg border border-black/10 bg-white shadow-sm">
-                      <div className="border-b border-black/10 p-4">
-                        <h2 className="text-lg font-bold">Financeiro pessoal</h2>
-                        <p className="text-sm text-black/60">
-                          Entradas e saidas pessoais separadas do caixa da empresa.
-                        </p>
+                      <div className="flex flex-col gap-3 border-b border-black/10 p-4 lg:flex-row lg:items-center lg:justify-between">
+                        <div>
+                          <h2 className="text-lg font-bold">Financeiro pessoal</h2>
+                          <p className="text-sm text-black/60">
+                            Entradas e saidas pessoais separadas do caixa da empresa.
+                          </p>
+                        </div>
+                        <label className="relative block min-w-0 lg:w-80">
+                          <Search
+                            aria-hidden
+                            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-black/40"
+                          />
+                          <input
+                            className="h-10 w-full rounded-lg border border-black/10 bg-paper pl-9 pr-3 text-sm outline-none focus:ring-4 focus:ring-sea/20"
+                            onChange={(event) =>
+                              setPersonalFinanceSearch(event.target.value)
+                            }
+                            placeholder="Buscar nome, descricao ou categoria"
+                            value={personalFinanceSearch}
+                          />
+                        </label>
                       </div>
                       <div className="table-scroll overflow-x-auto">
                         <table className="min-w-[980px] w-full text-left text-sm">
@@ -5880,7 +5981,7 @@ export function DashmarketDashboard() {
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-black/10">
-                            {personalFinanceEntries.map((entry) => {
+                            {filteredPersonalFinanceEntries.map((entry) => {
                               const status = resolveFinanceStatus(
                                 entry.status,
                                 entry.dueDate,
@@ -5956,13 +6057,13 @@ export function DashmarketDashboard() {
                                 </tr>
                               );
                             })}
-                            {personalFinanceEntries.length === 0 && (
+                            {filteredPersonalFinanceEntries.length === 0 && (
                               <tr>
                                 <td
                                   className="px-4 py-8 text-center text-black/55"
                                   colSpan={7}
                                 >
-                                  Nenhum lancamento pessoal cadastrado.
+                                  Nenhum lancamento pessoal encontrado.
                                 </td>
                               </tr>
                             )}
@@ -6219,11 +6320,27 @@ export function DashmarketDashboard() {
                     </form>
 
                     <section className="rounded-lg border border-black/10 bg-white shadow-sm">
-                      <div className="border-b border-black/10 p-4">
-                        <h2 className="text-lg font-bold">Emprestimos pessoais</h2>
-                        <p className="text-sm text-black/60">
-                          Acompanhe o que voce emprestou e o que pegou emprestado.
-                        </p>
+                      <div className="flex flex-col gap-3 border-b border-black/10 p-4 lg:flex-row lg:items-center lg:justify-between">
+                        <div>
+                          <h2 className="text-lg font-bold">Emprestimos pessoais</h2>
+                          <p className="text-sm text-black/60">
+                            Acompanhe o que voce emprestou e o que pegou emprestado.
+                          </p>
+                        </div>
+                        <label className="relative block min-w-0 lg:w-80">
+                          <Search
+                            aria-hidden
+                            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-black/40"
+                          />
+                          <input
+                            className="h-10 w-full rounded-lg border border-black/10 bg-paper pl-9 pr-3 text-sm outline-none focus:ring-4 focus:ring-sea/20"
+                            onChange={(event) =>
+                              setPersonalLoanSearch(event.target.value)
+                            }
+                            placeholder="Buscar pessoa, instituicao ou descricao"
+                            value={personalLoanSearch}
+                          />
+                        </label>
                       </div>
                       <div className="table-scroll overflow-x-auto">
                         <table className="min-w-[1080px] w-full text-left text-sm">
@@ -6241,7 +6358,7 @@ export function DashmarketDashboard() {
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-black/10">
-                            {personalLoans.map((loan) => {
+                            {filteredPersonalLoans.map((loan) => {
                               const status = resolveLoanStatus(
                                 loan.status,
                                 loan.dueDate,
@@ -6329,13 +6446,13 @@ export function DashmarketDashboard() {
                                 </tr>
                               );
                             })}
-                            {personalLoans.length === 0 && (
+                            {filteredPersonalLoans.length === 0 && (
                               <tr>
                                 <td
                                   className="px-4 py-8 text-center text-black/55"
                                   colSpan={9}
                                 >
-                                  Nenhum emprestimo cadastrado.
+                                  Nenhum emprestimo encontrado.
                                 </td>
                               </tr>
                             )}
