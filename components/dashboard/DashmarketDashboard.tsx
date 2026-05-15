@@ -3,11 +3,14 @@
 import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import {
+  AlertTriangle,
   BarChart3,
   Boxes,
+  BrainCircuit,
   Cable,
   CircleDollarSign,
   ClipboardList,
+  Lightbulb,
   LineChart,
   LogOut,
   Megaphone,
@@ -22,6 +25,9 @@ import {
   Search,
   ShieldCheck,
   Tags,
+  Target,
+  TrendingDown,
+  TrendingUp,
   Trash2,
   WalletCards
 } from "lucide-react";
@@ -39,6 +45,7 @@ import { ThemeToggle } from "@/components/dashboard/ThemeToggle";
 
 type ViewKey =
   | "margem"
+  | "ia"
   | "produtos"
   | "vendas"
   | "custos"
@@ -426,6 +433,36 @@ type InventoryValuationRow = InventoryDisplayRow & {
   unitNetValue: number;
   investedValue: number;
   hasPricing: boolean;
+};
+
+type AiInsightSeverity = "critical" | "warning" | "positive" | "info";
+
+type AiInsight = {
+  id: string;
+  title: string;
+  summary: string;
+  recommendation: string;
+  severity: AiInsightSeverity;
+  metricLabel: string;
+  metricValue: string;
+};
+
+type AiSkuPriority = {
+  sku: string;
+  title: string;
+  issue: string;
+  recommendation: string;
+  metric: string;
+  severity: AiInsightSeverity;
+  grossRevenue: number;
+};
+
+type AiSalesWindow = {
+  grossAmount: number;
+  contributionMargin: number;
+  marginRate: number;
+  orders: number;
+  quantity: number;
 };
 
 type AdvertisingMetricRow = {
@@ -837,6 +874,7 @@ const loanStatusLabel: Record<LoanStatus, string> = {
 
 const views: Array<{ key: ViewKey; label: string; icon: typeof BarChart3 }> = [
   { key: "margem", label: "Margem", icon: BarChart3 },
+  { key: "ia", label: "Análise IA", icon: BrainCircuit },
   { key: "produtos", label: "Produtos", icon: PackageCheck },
   { key: "vendas", label: "Vendas", icon: ClipboardList },
   { key: "financeiro_empresa", label: "Financeiro Empresa", icon: CircleDollarSign },
@@ -866,6 +904,24 @@ function statusClass(status: string) {
   if (status === "Critico") return "bg-rose-50 text-berry ring-rose-200";
   if (status === "Atencao") return "bg-amber-50 text-clay ring-amber-200";
   return "bg-emerald-50 text-sea ring-emerald-200";
+}
+
+function aiSeverityClass(severity: AiInsightSeverity) {
+  if (severity === "critical") return "bg-rose-50 text-berry ring-rose-200";
+  if (severity === "warning") return "bg-amber-50 text-clay ring-amber-200";
+  if (severity === "positive") return "bg-emerald-50 text-sea ring-emerald-200";
+  return "bg-sky-50 text-sky-700 ring-sky-200";
+}
+
+function aiSeverityLabel(severity: AiInsightSeverity) {
+  if (severity === "critical") return "Crítico";
+  if (severity === "warning") return "Atenção";
+  if (severity === "positive") return "Bom sinal";
+  return "Informação";
+}
+
+function clampNumber(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
 }
 
 function KpiCard({
@@ -1991,6 +2047,375 @@ export function DashmarketDashboard() {
       ),
     [productUnitRows]
   );
+
+  const aiSalesTrend = useMemo(() => {
+    const now = new Date();
+    const currentStart = new Date(now);
+    currentStart.setDate(now.getDate() - 30);
+    const previousStart = new Date(now);
+    previousStart.setDate(now.getDate() - 60);
+
+    const summarize = (rows: SalesDetailRow[]): AiSalesWindow =>
+      rows.reduce(
+        (totals, sale) => ({
+          grossAmount: totals.grossAmount + sale.grossAmount,
+          contributionMargin:
+            totals.contributionMargin + sale.contributionMargin,
+          marginRate: 0,
+          orders: totals.orders + 1,
+          quantity: totals.quantity + sale.quantity
+        }),
+        {
+          grossAmount: 0,
+          contributionMargin: 0,
+          marginRate: 0,
+          orders: 0,
+          quantity: 0
+        }
+      );
+
+    const currentRows = salesDetailRows.filter(
+      (sale) => new Date(sale.soldAt).getTime() >= currentStart.getTime()
+    );
+    const previousRows = salesDetailRows.filter((sale) => {
+      const soldAt = new Date(sale.soldAt).getTime();
+      return soldAt >= previousStart.getTime() && soldAt < currentStart.getTime();
+    });
+    const current = summarize(currentRows);
+    const previous = summarize(previousRows);
+    current.marginRate =
+      current.grossAmount > 0 ? current.contributionMargin / current.grossAmount : 0;
+    previous.marginRate =
+      previous.grossAmount > 0
+        ? previous.contributionMargin / previous.grossAmount
+        : 0;
+
+    return {
+      current,
+      previous,
+      marginDelta:
+        previous.grossAmount > 0 ? current.marginRate - previous.marginRate : null,
+      revenueDelta:
+        previous.grossAmount > 0
+          ? current.grossAmount / previous.grossAmount - 1
+          : null
+    };
+  }, [salesDetailRows]);
+
+  const aiAdsMetrics = useMemo(() => {
+    const adSpend = productUnitTotals.advertisingAmount;
+    const attributedRevenue = productUnitTotals.attributedRevenue;
+    const tacos = totals.grossRevenue > 0 ? adSpend / totals.grossRevenue : 0;
+    const acos = attributedRevenue > 0 ? adSpend / attributedRevenue : 0;
+    const payback = adSpend > 0 ? attributedRevenue / adSpend : 0;
+
+    if (adSpend <= 0) {
+      return {
+        adSpend,
+        attributedRevenue,
+        tacos,
+        acos,
+        payback,
+        verdict: "Sem investimento em ADS",
+        recommendation:
+          "Comece com testes pequenos nos SKUs com boa margem e estoque saudavel.",
+        severity: "info" as AiInsightSeverity
+      };
+    }
+
+    if (attributedRevenue <= 0) {
+      return {
+        adSpend,
+        attributedRevenue,
+        tacos,
+        acos,
+        payback,
+        verdict: "ADS sem retorno atribuido",
+        recommendation:
+          "Revise campanhas, palavras e SKUs antes de aumentar orçamento.",
+        severity: "critical" as AiInsightSeverity
+      };
+    }
+
+    if (tacos > marginRate) {
+      return {
+        adSpend,
+        attributedRevenue,
+        tacos,
+        acos,
+        payback,
+        verdict: "ADS pode estar consumindo margem",
+        recommendation:
+          "Reduza verba nos SKUs com TACOS alto e proteja campanhas dos produtos rentaveis.",
+        severity: "critical" as AiInsightSeverity
+      };
+    }
+
+    if (tacos > marginRate * 0.55) {
+      return {
+        adSpend,
+        attributedRevenue,
+        tacos,
+        acos,
+        payback,
+        verdict: "ADS exige controle de orçamento",
+        recommendation:
+          "Mantenha o investimento, mas acompanhe TACOS por SKU antes de escalar.",
+        severity: "warning" as AiInsightSeverity
+      };
+    }
+
+    return {
+      adSpend,
+      attributedRevenue,
+      tacos,
+      acos,
+      payback,
+      verdict: "ADS saudavel para a margem atual",
+      recommendation:
+        "Considere aumentar gradualmente nos SKUs com margem positiva e estoque disponivel.",
+      severity: "positive" as AiInsightSeverity
+    };
+  }, [
+    marginRate,
+    productUnitTotals.advertisingAmount,
+    productUnitTotals.attributedRevenue,
+    totals.grossRevenue
+  ]);
+
+  const aiSkuPriorities = useMemo<AiSkuPriority[]>(() => {
+    const severityRank: Record<AiInsightSeverity, number> = {
+      critical: 3,
+      warning: 2,
+      info: 1,
+      positive: 0
+    };
+
+    return productUnitRows
+      .filter((product) => product.hasSales)
+      .map((product) => {
+        if (product.contributionMarginUnit < 0) {
+          return {
+            sku: product.sku,
+            title: product.title,
+            issue: "Margem negativa",
+            recommendation:
+              "Recalcule preço, taxa, frete e custo antes de investir mais.",
+            metric: formatCurrency.format(product.contributionMarginUnit),
+            severity: "critical" as AiInsightSeverity,
+            grossRevenue: product.grossRevenue
+          };
+        }
+
+        if (product.advertisingAmount > 0 && product.attributedRevenue <= 0) {
+          return {
+            sku: product.sku,
+            title: product.title,
+            issue: "ADS sem receita atribuida",
+            recommendation:
+              "Pausar ou revisar campanha ate recuperar atribuição de receita.",
+            metric: formatCurrency.format(product.advertisingAmount),
+            severity: "warning" as AiInsightSeverity,
+            grossRevenue: product.grossRevenue
+          };
+        }
+
+        if (product.tacosRate > marginRate && product.advertisingAmount > 0) {
+          return {
+            sku: product.sku,
+            title: product.title,
+            issue: "TACOS acima da margem média",
+            recommendation:
+              "Baixe a verba ou ajuste lances enquanto testa preço e conversão.",
+            metric: formatPercent(product.tacosRate),
+            severity: "warning" as AiInsightSeverity,
+            grossRevenue: product.grossRevenue
+          };
+        }
+
+        if (product.contributionMarginRate < 0.12) {
+          return {
+            sku: product.sku,
+            title: product.title,
+            issue: "Margem baixa",
+            recommendation:
+              "Priorize revisão de custo, imposto e taxa antes de ganhar volume.",
+            metric: formatPercent(product.contributionMarginRate),
+            severity: "warning" as AiInsightSeverity,
+            grossRevenue: product.grossRevenue
+          };
+        }
+
+        return {
+          sku: product.sku,
+          title: product.title,
+          issue: "SKU saudável",
+          recommendation:
+            "Pode receber mais atenção comercial se houver estoque suficiente.",
+          metric: formatPercent(product.contributionMarginRate),
+          severity: "positive" as AiInsightSeverity,
+          grossRevenue: product.grossRevenue
+        };
+      })
+      .sort(
+        (current, next) =>
+          severityRank[next.severity] - severityRank[current.severity] ||
+          next.grossRevenue - current.grossRevenue
+      )
+      .slice(0, 6);
+  }, [marginRate, productUnitRows]);
+
+  const aiBusinessScore = useMemo(() => {
+    let score = 100;
+
+    if (totals.contributionMargin < 0) score -= 32;
+    else if (marginRate < 0.12) score -= 24;
+    else if (marginRate < 0.22) score -= 12;
+
+    if (aiAdsMetrics.severity === "critical") score -= 18;
+    if (aiAdsMetrics.severity === "warning") score -= 9;
+
+    if (aiSalesTrend.marginDelta !== null && aiSalesTrend.marginDelta < -0.03) {
+      score -= 14;
+    }
+
+    if (
+      totals.netRevenue > 0 &&
+      inventoryValuationTotals.fullInvestedValue > totals.netRevenue * 0.8
+    ) {
+      score -= 8;
+    }
+
+    const riskySkus = aiSkuPriorities.filter(
+      (priority) =>
+        priority.severity === "critical" || priority.severity === "warning"
+    ).length;
+    score -= Math.min(riskySkus * 4, 16);
+
+    return clampNumber(Math.round(score), 0, 100);
+  }, [
+    aiAdsMetrics.severity,
+    aiSalesTrend.marginDelta,
+    aiSkuPriorities,
+    inventoryValuationTotals.fullInvestedValue,
+    marginRate,
+    totals.contributionMargin,
+    totals.netRevenue
+  ]);
+
+  const aiInsights = useMemo<AiInsight[]>(() => {
+    const insights: AiInsight[] = [];
+
+    insights.push({
+      id: "margin",
+      title:
+        marginRate < 0.12
+          ? "Lucratividade em zona de risco"
+          : marginRate < 0.22
+            ? "Margem pede acompanhamento"
+            : "Margem geral saudavel",
+      summary:
+        marginRate < 0.12
+          ? "A margem de contribuição está baixa para absorver variações de frete, imposto e ADS."
+          : marginRate < 0.22
+            ? "A operação está positiva, mas ainda sensível a aumento de custos e mídia."
+            : "A operação tem espaço para crescer sem perder controle de margem.",
+      recommendation:
+        marginRate < 0.12
+          ? "Comece pelos SKUs com maior receita e menor margem antes de escalar vendas."
+          : marginRate < 0.22
+            ? "Monitore os SKUs com TACOS alto e mantenha custo unitario atualizado."
+            : "Use a margem atual para testar crescimento nos produtos com estoque."
+,
+      severity:
+        marginRate < 0.12
+          ? "critical"
+          : marginRate < 0.22
+            ? "warning"
+            : "positive",
+      metricLabel: "Margem",
+      metricValue: formatPercent(marginRate)
+    });
+
+    insights.push({
+      id: "ads",
+      title: aiAdsMetrics.verdict,
+      summary: `Investimento de ${formatCurrency.format(
+        aiAdsMetrics.adSpend
+      )} com receita atribuida de ${formatCurrency.format(
+        aiAdsMetrics.attributedRevenue
+      )}.`,
+      recommendation: aiAdsMetrics.recommendation,
+      severity: aiAdsMetrics.severity,
+      metricLabel: "TACOS",
+      metricValue: formatPercent(aiAdsMetrics.tacos)
+    });
+
+    insights.push({
+      id: "trend",
+      title:
+        aiSalesTrend.marginDelta === null
+          ? "Historico ainda insuficiente"
+          : aiSalesTrend.marginDelta < -0.03
+            ? "Lucratividade em queda"
+            : aiSalesTrend.marginDelta > 0.03
+              ? "Lucratividade em alta"
+              : "Lucratividade estavel",
+      summary:
+        aiSalesTrend.marginDelta === null
+          ? "Ainda não há base anterior suficiente para comparar os ultimos 30 dias."
+          : `A margem dos ultimos 30 dias variou ${formatPercent(
+              aiSalesTrend.marginDelta
+            )} contra os 30 dias anteriores.`,
+      recommendation:
+        aiSalesTrend.marginDelta === null
+          ? "Depois de novas sincronizacoes, esta leitura passa a indicar queda ou melhora."
+          : aiSalesTrend.marginDelta < -0.03
+            ? "Compare taxas, frete, descontos e ADS dos SKUs de maior faturamento."
+            : aiSalesTrend.marginDelta > 0.03
+              ? "Identifique os SKUs que puxaram a melhora e replique a estratégia."
+              : "Mantenha rotina de conferência semanal para detectar queda cedo.",
+      severity:
+        aiSalesTrend.marginDelta === null
+          ? "info"
+          : aiSalesTrend.marginDelta < -0.03
+            ? "warning"
+            : aiSalesTrend.marginDelta > 0.03
+              ? "positive"
+              : "info",
+      metricLabel: "Tendência",
+      metricValue:
+        aiSalesTrend.marginDelta === null
+          ? "Sem base"
+          : formatPercent(aiSalesTrend.marginDelta)
+    });
+
+    insights.push({
+      id: "stock",
+      title: "Capital parado no Full",
+      summary: `O estoque Full representa ${formatCurrency.format(
+        inventoryValuationTotals.fullInvestedValue
+      )} em valor liquido estimado.`,
+      recommendation:
+        inventoryValuationTotals.fullInvestedValue > totals.netRevenue * 0.8
+          ? "Revise giro por SKU antes de recompor estoque ou subir verba de ADS."
+          : "Use o estoque Full como base para priorizar campanhas dos SKUs rentaveis.",
+      severity:
+        inventoryValuationTotals.fullInvestedValue > totals.netRevenue * 0.8
+          ? "warning"
+          : "info",
+      metricLabel: "Full",
+      metricValue: formatCurrency.format(inventoryValuationTotals.fullInvestedValue)
+    });
+
+    return insights;
+  }, [
+    aiAdsMetrics,
+    aiSalesTrend.marginDelta,
+    inventoryValuationTotals.fullInvestedValue,
+    marginRate,
+    totals.netRevenue
+  ]);
 
   const costCenterProductRows = useMemo<CostCenterProductRow[]>(
     () =>
@@ -4991,6 +5416,301 @@ export function DashmarketDashboard() {
                   ))}
                 </div>
               )}
+            </section>
+          )}
+
+          {activeView === "ia" && (
+            <section className="mt-5 grid gap-5">
+              <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <KpiCard
+                  detail={`Margem ${formatPercent(marginRate)} | Receita ${formatCurrency.format(totals.netRevenue)}`}
+                  icon={BrainCircuit}
+                  title="Score IA"
+                  tone={
+                    aiBusinessScore >= 75
+                      ? "moss"
+                      : aiBusinessScore >= 50
+                        ? "clay"
+                        : "berry"
+                  }
+                  value={`${aiBusinessScore}/100`}
+                />
+                <KpiCard
+                  detail={aiAdsMetrics.verdict}
+                  icon={Target}
+                  title="TACOS ADS"
+                  tone={
+                    aiAdsMetrics.severity === "positive"
+                      ? "moss"
+                      : aiAdsMetrics.severity === "critical"
+                        ? "berry"
+                        : "clay"
+                  }
+                  value={formatPercent(aiAdsMetrics.tacos)}
+                />
+                <KpiCard
+                  detail={`Atual ${formatPercent(aiSalesTrend.current.marginRate)} | Anterior ${
+                    aiSalesTrend.previous.grossAmount > 0
+                      ? formatPercent(aiSalesTrend.previous.marginRate)
+                      : "sem base"
+                  }`}
+                  icon={
+                    aiSalesTrend.marginDelta !== null &&
+                    aiSalesTrend.marginDelta < -0.03
+                      ? TrendingDown
+                      : TrendingUp
+                  }
+                  title="Tendência margem"
+                  tone={
+                    aiSalesTrend.marginDelta !== null &&
+                    aiSalesTrend.marginDelta < -0.03
+                      ? "berry"
+                      : aiSalesTrend.marginDelta !== null &&
+                          aiSalesTrend.marginDelta > 0.03
+                        ? "moss"
+                        : "clay"
+                  }
+                  value={
+                    aiSalesTrend.marginDelta === null
+                      ? "Sem base"
+                      : formatPercent(aiSalesTrend.marginDelta)
+                  }
+                />
+                <KpiCard
+                  detail="SKUs que pedem acao primeiro"
+                  icon={AlertTriangle}
+                  title="Prioridades"
+                  tone={
+                    aiSkuPriorities.some(
+                      (priority) => priority.severity === "critical"
+                    )
+                      ? "berry"
+                      : aiSkuPriorities.some(
+                            (priority) => priority.severity === "warning"
+                          )
+                        ? "clay"
+                        : "moss"
+                  }
+                  value={formatNumber.format(
+                    aiSkuPriorities.filter(
+                      (priority) => priority.severity !== "positive"
+                    ).length
+                  )}
+                />
+              </section>
+
+              <section className="grid gap-5 xl:grid-cols-[1.15fr_0.85fr]">
+                <section className="rounded-lg border border-black/10 bg-white shadow-sm">
+                  <div className="border-b border-black/10 p-4">
+                    <div className="flex items-center gap-2">
+                      <BrainCircuit aria-hidden className="h-5 w-5 text-sea" />
+                      <h2 className="text-lg font-bold">Leitura IA do negócio</h2>
+                    </div>
+                    <p className="mt-1 text-sm text-black/60">
+                      Diagnóstico consolidado de margem, vendas, ADS e estoque.
+                    </p>
+                  </div>
+                  <div className="grid gap-3 p-4">
+                    {aiInsights.map((insight) => (
+                      <article
+                        className="rounded-lg border border-black/10 bg-paper p-4"
+                        key={insight.id}
+                      >
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                          <div>
+                            <span
+                              className={`inline-flex rounded-lg px-2 py-1 text-xs font-bold ring-1 ${aiSeverityClass(insight.severity)}`}
+                            >
+                              {aiSeverityLabel(insight.severity)}
+                            </span>
+                            <h3 className="mt-3 text-base font-bold">
+                              {insight.title}
+                            </h3>
+                            <p className="mt-1 text-sm text-black/60">
+                              {insight.summary}
+                            </p>
+                          </div>
+                          <div className="min-w-32 rounded-lg border border-black/10 bg-white px-3 py-2 text-right">
+                            <p className="text-xs font-bold uppercase tracking-normal text-black/45">
+                              {insight.metricLabel}
+                            </p>
+                            <p className="mt-1 text-lg font-black">
+                              {insight.metricValue}
+                            </p>
+                          </div>
+                        </div>
+                        <p className="mt-3 text-sm font-semibold text-ink">
+                          {insight.recommendation}
+                        </p>
+                      </article>
+                    ))}
+                  </div>
+                </section>
+
+                <section className="rounded-lg border border-black/10 bg-white shadow-sm">
+                  <div className="border-b border-black/10 p-4">
+                    <div className="flex items-center gap-2">
+                      <Lightbulb aria-hidden className="h-5 w-5 text-clay" />
+                      <h2 className="text-lg font-bold">Prioridades por SKU</h2>
+                    </div>
+                    <p className="mt-1 text-sm text-black/60">
+                      Produtos ordenados por risco e impacto no faturamento.
+                    </p>
+                  </div>
+                  <div className="table-scroll overflow-x-auto">
+                    <table className="min-w-[760px] w-full text-left text-sm">
+                      <thead className="bg-black/[0.025] text-xs uppercase tracking-normal text-black/50">
+                        <tr>
+                          <th className="px-4 py-3">SKU</th>
+                          <th className="px-4 py-3">Diagnóstico</th>
+                          <th className="px-4 py-3">Métrica</th>
+                          <th className="px-4 py-3">Ação sugerida</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-black/10">
+                        {aiSkuPriorities.map((priority) => (
+                          <tr key={`${priority.sku}-${priority.issue}`}>
+                            <td className="px-4 py-3">
+                              <p className="font-bold">{priority.sku}</p>
+                              <p className="text-xs text-black/50">
+                                {priority.title}
+                              </p>
+                            </td>
+                            <td className="px-4 py-3">
+                              <span
+                                className={`inline-flex rounded-lg px-2 py-1 text-xs font-bold ring-1 ${aiSeverityClass(priority.severity)}`}
+                              >
+                                {priority.issue}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 font-bold">{priority.metric}</td>
+                            <td className="px-4 py-3 text-black/65">
+                              {priority.recommendation}
+                            </td>
+                          </tr>
+                        ))}
+                        {aiSkuPriorities.length === 0 && (
+                          <tr>
+                            <td
+                              className="px-4 py-8 text-center text-black/55"
+                              colSpan={4}
+                            >
+                              Sincronize vendas e custos para gerar prioridades.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+              </section>
+
+              <section className="grid gap-5 xl:grid-cols-3">
+                <section className="rounded-lg border border-black/10 bg-white p-4 shadow-sm">
+                  <div className="flex items-center gap-2">
+                    <Megaphone aria-hidden className="h-5 w-5 text-berry" />
+                    <h2 className="text-lg font-bold">ADS: vale o investimento?</h2>
+                  </div>
+                  <div className="mt-4 grid gap-3">
+                    {[
+                      ["Investimento", formatCurrency.format(aiAdsMetrics.adSpend)],
+                      [
+                        "Receita atribuida",
+                        formatCurrency.format(aiAdsMetrics.attributedRevenue)
+                      ],
+                      ["ACOS", formatPercent(aiAdsMetrics.acos)],
+                      ["Payback", `${aiAdsMetrics.payback.toFixed(2)}x`]
+                    ].map(([label, value]) => (
+                      <div
+                        className="flex items-center justify-between rounded-lg border border-black/10 bg-paper px-3 py-2"
+                        key={label}
+                      >
+                        <span className="text-sm font-semibold text-black/60">
+                          {label}
+                        </span>
+                        <span className="font-bold">{value}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="mt-4 text-sm font-semibold text-ink">
+                    {aiAdsMetrics.recommendation}
+                  </p>
+                </section>
+
+                <section className="rounded-lg border border-black/10 bg-white p-4 shadow-sm">
+                  <div className="flex items-center gap-2">
+                    <LineChart aria-hidden className="h-5 w-5 text-sea" />
+                    <h2 className="text-lg font-bold">Últimos 30 dias</h2>
+                  </div>
+                  <div className="mt-4 grid gap-3">
+                    {[
+                      [
+                        "Faturamento",
+                        formatCurrency.format(aiSalesTrend.current.grossAmount)
+                      ],
+                      [
+                        "Margem contrib.",
+                        formatCurrency.format(
+                          aiSalesTrend.current.contributionMargin
+                        )
+                      ],
+                      ["Pedidos", formatNumber.format(aiSalesTrend.current.orders)],
+                      ["Unidades", formatNumber.format(aiSalesTrend.current.quantity)]
+                    ].map(([label, value]) => (
+                      <div
+                        className="flex items-center justify-between rounded-lg border border-black/10 bg-paper px-3 py-2"
+                        key={label}
+                      >
+                        <span className="text-sm font-semibold text-black/60">
+                          {label}
+                        </span>
+                        <span className="font-bold">{value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+
+                <section className="rounded-lg border border-black/10 bg-white p-4 shadow-sm">
+                  <div className="flex items-center gap-2">
+                    <Boxes aria-hidden className="h-5 w-5 text-clay" />
+                    <h2 className="text-lg font-bold">Estoque e capital</h2>
+                  </div>
+                  <div className="mt-4 grid gap-3">
+                    {[
+                      [
+                        "Valor Full",
+                        formatCurrency.format(
+                          inventoryValuationTotals.fullInvestedValue
+                        )
+                      ],
+                      [
+                        "Valor total",
+                        formatCurrency.format(inventoryValuationTotals.investedValue)
+                      ],
+                      [
+                        "Unidades totais",
+                        formatNumber.format(inventoryValuationTotals.totalQuantity)
+                      ],
+                      [
+                        "Disponiveis",
+                        formatNumber.format(
+                          inventoryValuationTotals.availableQuantity
+                        )
+                      ]
+                    ].map(([label, value]) => (
+                      <div
+                        className="flex items-center justify-between rounded-lg border border-black/10 bg-paper px-3 py-2"
+                        key={label}
+                      >
+                        <span className="text-sm font-semibold text-black/60">
+                          {label}
+                        </span>
+                        <span className="font-bold">{value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              </section>
             </section>
           )}
 
