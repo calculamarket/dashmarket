@@ -1342,6 +1342,10 @@ function apiErrorMessage(payload: unknown, fallback: string) {
   return fallback;
 }
 
+function errorMessage(error: unknown, fallback: string) {
+  return error instanceof Error ? error.message : fallback;
+}
+
 export function DashmarketDashboard() {
   const [supabaseClient] = useState(() => {
     try {
@@ -1503,13 +1507,14 @@ export function DashmarketDashboard() {
     notes: ""
   });
 
-  const activeSales = realSales.length > 0 ? realSales : salesSeed;
+  const shouldUseDemoData = supabaseStatus !== "connected";
+  const activeSales = shouldUseDemoData ? salesSeed : realSales;
   const activeAdvertising =
-    realAdvertising.length > 0 ? realAdvertising : adSpendSeed;
+    shouldUseDemoData ? adSpendSeed : realAdvertising;
   const displayInventoryRows =
-    realInventory.length > 0 ? realInventory : inventoryRows;
+    shouldUseDemoData ? inventoryRows : realInventory;
   const displayPromotionRows =
-    realPromotions.length > 0 ? realPromotions : promotionRows;
+    shouldUseDemoData ? promotionRows : realPromotions;
   const productOptions = useMemo(
     () => {
       const options =
@@ -1613,7 +1618,7 @@ export function DashmarketDashboard() {
   );
   const salesDetailSources = useMemo(
     () =>
-      realSaleDetails.length > 0
+      !shouldUseDemoData
         ? realSaleDetails
         : salesSeed.map((sale, index) => ({
             id: `demo-sale-${sale.sku}`,
@@ -1632,7 +1637,7 @@ export function DashmarketDashboard() {
             discountAmount: sale.discounts,
             orderTaxAmount: sale.taxes
           })),
-    [realSaleDetails]
+    [realSaleDetails, shouldUseDemoData]
   );
   const salesDetailRows = useMemo<SalesDetailRow[]>(
     () =>
@@ -2516,6 +2521,18 @@ export function DashmarketDashboard() {
         return;
       }
 
+      const loadErrors: string[] = [];
+      const loadPanelSection = async (
+        label: string,
+        task: () => Promise<void>
+      ) => {
+        try {
+          await task();
+        } catch (error) {
+          loadErrors.push(`${label}: ${errorMessage(error, "falha ao carregar")}`);
+        }
+      };
+
       try {
         const { data: sessionData, error: sessionError } =
           await supabaseClient.auth.getSession();
@@ -2580,15 +2597,39 @@ export function DashmarketDashboard() {
         setSupabaseStatus("connected");
 
         if (currentOrganization) {
-          await loadCostCenter(currentOrganization.id);
-          await loadSales(currentOrganization.id);
-          await loadInventory(currentOrganization.id);
-          await loadAdvertising(currentOrganization.id);
-          await loadPromotions(currentOrganization.id);
-          await loadCompanyFinance(currentOrganization.id);
-          await loadPersonalFinance(session.user.id);
-          await loadPersonalLoans(session.user.id);
-          await loadMarketplaceAccounts(currentOrganization.id);
+          await loadPanelSection("Centro de custos", () =>
+            loadCostCenter(currentOrganization.id)
+          );
+          await loadPanelSection("Vendas", () => loadSales(currentOrganization.id));
+          await loadPanelSection("Estoque", () =>
+            loadInventory(currentOrganization.id)
+          );
+          await loadPanelSection("Publicidade", () =>
+            loadAdvertising(currentOrganization.id)
+          );
+          await loadPanelSection("Promocoes", () =>
+            loadPromotions(currentOrganization.id)
+          );
+          await loadPanelSection("Financeiro empresa", () =>
+            loadCompanyFinance(currentOrganization.id)
+          );
+          await loadPanelSection("Financeiro pessoal", () =>
+            loadPersonalFinance(session.user.id)
+          );
+          await loadPanelSection("Emprestimos", () =>
+            loadPersonalLoans(session.user.id)
+          );
+          await loadPanelSection("Conta Mercado Livre", () =>
+            loadMarketplaceAccounts(currentOrganization.id)
+          );
+
+          if (isMounted && loadErrors.length > 0) {
+            setDataMessage(
+              `Conectado como ${session.user.email ?? "usuario"}, mas algumas areas nao carregaram: ${loadErrors
+                .slice(0, 3)
+                .join(" | ")}${loadErrors.length > 3 ? " ..." : ""}`
+            );
+          }
         } else {
           setCosts([]);
           setRealSales([]);
@@ -2606,6 +2647,8 @@ export function DashmarketDashboard() {
         if (!isMounted) return;
         setSupabaseStatus("error");
         setUserId(null);
+        setUserEmail(null);
+        setOrganization(null);
         setRealSales([]);
         setRealSaleDetails([]);
         setRealInventory([]);
@@ -2626,8 +2669,8 @@ export function DashmarketDashboard() {
 
     loadWorkspace();
 
-    const authSubscription = supabaseClient?.auth.onAuthStateChange((event) => {
-      if (!isMounted || event === "INITIAL_SESSION") return;
+    const authSubscription = supabaseClient?.auth.onAuthStateChange(() => {
+      if (!isMounted) return;
       void loadWorkspace();
     });
 
