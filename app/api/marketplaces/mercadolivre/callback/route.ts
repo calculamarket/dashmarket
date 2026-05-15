@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import {
-  missingMercadoLivreConnectionVariables,
-  resolveAppUrl,
-  resolveMercadoLivreRedirectUri
+  getMercadoLivreOAuthConfig,
+  resolveAppUrl
 } from "@/lib/marketplaces/mercadolivre-oauth";
 
 type OAuthState = {
@@ -71,14 +70,12 @@ export async function GET(request: Request) {
   const requestUrl = new URL(request.url);
   const code = requestUrl.searchParams.get("code");
   const state = parseState(requestUrl.searchParams.get("state"));
-  const redirectUri = resolveMercadoLivreRedirectUri(requestUrl);
+  const oauthConfig = getMercadoLivreOAuthConfig(requestUrl);
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  const clientId = process.env.MERCADOLIVRE_CLIENT_ID;
-  const clientSecret = process.env.MERCADOLIVRE_CLIENT_SECRET;
   const appUrl = resolveAppUrl(requestUrl);
   const missingVariables = [
-    ...missingMercadoLivreConnectionVariables(),
+    ...oauthConfig.missingVariables,
     ...[
       ["NEXT_PUBLIC_SUPABASE_URL", supabaseUrl],
       ["SUPABASE_SERVICE_ROLE_KEY", serviceRoleKey]
@@ -95,8 +92,8 @@ export async function GET(request: Request) {
     missingVariables.length > 0 ||
     !supabaseUrl ||
     !serviceRoleKey ||
-    !clientId ||
-    !clientSecret
+    !oauthConfig.clientId ||
+    !oauthConfig.clientSecret
   ) {
     return redirectWithStatus(
       appUrl,
@@ -107,10 +104,10 @@ export async function GET(request: Request) {
 
   const tokenPayload = new URLSearchParams({
     grant_type: "authorization_code",
-    client_id: clientId,
-    client_secret: clientSecret,
+    client_id: oauthConfig.clientId,
+    client_secret: oauthConfig.clientSecret,
     code,
-    redirect_uri: redirectUri
+    redirect_uri: oauthConfig.redirectUri
   });
 
   const tokenResponse = await fetch("https://api.mercadolibre.com/oauth/token", {

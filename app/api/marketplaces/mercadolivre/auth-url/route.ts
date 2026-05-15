@@ -1,17 +1,12 @@
 import { NextResponse } from "next/server";
-import {
-  missingMercadoLivreConnectionVariables,
-  resolveMercadoLivreRedirectUri
-} from "@/lib/marketplaces/mercadolivre-oauth";
+import { getMercadoLivreOAuthConfig } from "@/lib/marketplaces/mercadolivre-oauth";
 import { mercadoLivreAdapter } from "@/lib/marketplaces/mercadolivre";
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const organizationId = url.searchParams.get("organizationId");
   const siteId = url.searchParams.get("siteId") ?? "MLB";
-  const clientId = process.env.MERCADOLIVRE_CLIENT_ID;
-  const redirectUri = resolveMercadoLivreRedirectUri(url);
-  const missingVariables = missingMercadoLivreConnectionVariables();
+  const oauthConfig = getMercadoLivreOAuthConfig(url);
 
   if (!organizationId) {
     return NextResponse.json(
@@ -20,11 +15,15 @@ export async function GET(request: Request) {
     );
   }
 
-  if (missingVariables.length > 0 || !clientId || !mercadoLivreAdapter.buildAuthorizationUrl) {
+  if (
+    oauthConfig.missingVariables.length > 0 ||
+    !oauthConfig.clientId ||
+    !mercadoLivreAdapter.buildAuthorizationUrl
+  ) {
     return NextResponse.json(
       {
         error: "Mercado Livre ainda nao foi configurado no ambiente.",
-        details: `Faltam variaveis: ${missingVariables.join(", ")}.`,
+        details: `Faltam variaveis: ${oauthConfig.missingVariables.join(", ")}.`,
         hint: "Configure essas variaveis na Vercel e publique novamente o projeto."
       },
       { status: 500 }
@@ -40,12 +39,12 @@ export async function GET(request: Request) {
 
   return NextResponse.json({
     url: mercadoLivreAdapter.buildAuthorizationUrl({
-      clientId,
-      redirectUri,
+      clientId: oauthConfig.clientId,
+      redirectUri: oauthConfig.redirectUri,
       state,
       siteId
     }),
-    redirectUri,
+    redirectUri: oauthConfig.redirectUri,
     state
   });
 }

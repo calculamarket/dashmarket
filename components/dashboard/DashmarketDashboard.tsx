@@ -224,6 +224,20 @@ type ApiErrorPayload = {
   status?: number;
 };
 
+type MercadoLivreDiagnosticCheck = {
+  label: string;
+  status: "ok" | "warning" | "error";
+  message: string;
+};
+
+type MercadoLivreDiagnosticsResponse = {
+  appUrl?: string;
+  checks: MercadoLivreDiagnosticCheck[];
+  redirectUri?: string;
+  status: "ok" | "warning" | "error";
+  summary: string;
+};
+
 type CostCenterRow = {
   id: string;
   cost_name: string;
@@ -1364,6 +1378,7 @@ export function DashmarketDashboard() {
   const [dataMessage, setDataMessage] = useState<string | null>(null);
   const [isSavingCost, setIsSavingCost] = useState(false);
   const [isConnectingMarketplace, setIsConnectingMarketplace] = useState(false);
+  const [isDiagnosingMarketplace, setIsDiagnosingMarketplace] = useState(false);
   const [isSyncingListings, setIsSyncingListings] = useState(false);
   const [isSyncingOrders, setIsSyncingOrders] = useState(false);
   const [isSyncingInventory, setIsSyncingInventory] = useState(false);
@@ -1380,6 +1395,8 @@ export function DashmarketDashboard() {
     useState<SyncAdvertisingSummary | null>(null);
   const [promotionsSyncSummary, setPromotionsSyncSummary] =
     useState<SyncPromotionsSummary | null>(null);
+  const [marketplaceDiagnostics, setMarketplaceDiagnostics] =
+    useState<MercadoLivreDiagnosticsResponse | null>(null);
   const [costForm, setCostForm] = useState({
     sku: salesSeed[0].sku,
     label: "",
@@ -3655,6 +3672,63 @@ export function DashmarketDashboard() {
     setDataMessage("Sessao encerrada.");
   }
 
+  async function diagnoseMercadoLivreConnection(prefix?: string) {
+    if (!supabaseClient || !organization) {
+      setDataMessage("Entre no DASHMARKET antes de diagnosticar o Mercado Livre.");
+      return null;
+    }
+
+    setIsDiagnosingMarketplace(true);
+
+    try {
+      const { data: sessionData, error: sessionError } =
+        await supabaseClient.auth.getSession();
+
+      if (sessionError) throw sessionError;
+
+      const accessToken = sessionData.session?.access_token;
+      if (!accessToken) throw new Error("Sessao expirada. Entre novamente.");
+
+      const response = await fetch(
+        "/api/marketplaces/mercadolivre/diagnostics",
+        {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${accessToken}`,
+            "content-type": "application/json"
+          },
+          body: JSON.stringify({ organizationId: organization.id })
+        }
+      );
+      const payload = await readApiPayload<MercadoLivreDiagnosticsResponse>(
+        response
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          apiErrorMessage(payload, "Nao foi possivel diagnosticar o conector.")
+        );
+      }
+
+      const diagnostics = payload as MercadoLivreDiagnosticsResponse;
+      setMarketplaceDiagnostics(diagnostics);
+      setDataMessage(
+        prefix ? `${prefix} Diagnostico: ${diagnostics.summary}` : diagnostics.summary
+      );
+
+      return diagnostics;
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Nao foi possivel diagnosticar o conector Mercado Livre.";
+      setDataMessage(prefix ? `${prefix} Diagnostico: ${message}` : message);
+      return null;
+    } finally {
+      setIsDiagnosingMarketplace(false);
+    }
+  }
+
   async function connectMercadoLivre() {
     if (supabaseStatus !== "connected") {
       setDataMessage("Entre no DASHMARKET antes de conectar o Mercado Livre.");
@@ -3668,6 +3742,7 @@ export function DashmarketDashboard() {
 
     setIsConnectingMarketplace(true);
     setDataMessage(null);
+    setMarketplaceDiagnostics(null);
 
     try {
       const response = await fetch(
@@ -3684,11 +3759,12 @@ export function DashmarketDashboard() {
 
       window.location.href = authPayload.url;
     } catch (error) {
-      setDataMessage(
+      const message =
         error instanceof Error
           ? error.message
-          : "Nao foi possivel conectar o Mercado Livre."
-      );
+          : "Nao foi possivel conectar o Mercado Livre.";
+      setDataMessage(message);
+      await diagnoseMercadoLivreConnection(message);
       setIsConnectingMarketplace(false);
     }
   }
@@ -4248,6 +4324,16 @@ export function DashmarketDashboard() {
                 {marketplaceConnectionHint}
               </p>
             )}
+            <button
+              className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-white/10 px-3 text-sm font-bold text-white ring-1 ring-white/20 hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={!isMarketplaceWorkspaceReady || isDiagnosingMarketplace}
+              onClick={() => void diagnoseMercadoLivreConnection()}
+              title="Diagnosticar conexão Mercado Livre"
+              type="button"
+            >
+              <Search aria-hidden className="h-4 w-4" />
+              {isDiagnosingMarketplace ? "Diagnosticando" : "Testar Conexão"}
+            </button>
             {mercadoLivreAccount && (
               <button
                 className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-teal-200 px-3 text-sm font-bold text-ink hover:bg-teal-100"
@@ -4306,6 +4392,16 @@ export function DashmarketDashboard() {
                 type="button"
               >
                 <Cable aria-hidden className="h-4 w-4" />
+              </button>
+              <button
+                aria-label="Diagnosticar conexão Mercado Livre"
+                className="grid h-10 w-10 place-items-center rounded-lg bg-white/10 text-white ring-1 ring-white/20 hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={!isMarketplaceWorkspaceReady || isDiagnosingMarketplace}
+                onClick={() => void diagnoseMercadoLivreConnection()}
+                title="Diagnosticar conexão Mercado Livre"
+                type="button"
+              >
+                <Search aria-hidden className="h-4 w-4" />
               </button>
               {mercadoLivreAccount && (
                 <button
@@ -4528,6 +4624,44 @@ export function DashmarketDashboard() {
                     ? "A margem ja esta usando vendas reais sincronizadas do Mercado Livre."
                     : "Custos cadastrados nesta tela ja sao salvos no banco. Vendas, estoque e publicidade seguem demonstrativos ate sincronizarmos o Mercado Livre.")}
               </p>
+              {marketplaceDiagnostics && (
+                <div className="mt-3 grid gap-2">
+                  <div className="flex flex-col gap-1 rounded-lg bg-paper px-3 py-2 ring-1 ring-black/10">
+                    <p className="text-xs font-bold uppercase tracking-normal text-black/45">
+                      Diagnostico Mercado Livre
+                    </p>
+                    <p className="font-semibold text-ink">
+                      {marketplaceDiagnostics.summary}
+                    </p>
+                    {marketplaceDiagnostics.redirectUri && (
+                      <p className="text-xs text-black/55">
+                        Callback: {marketplaceDiagnostics.redirectUri}
+                      </p>
+                    )}
+                  </div>
+                  <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                    {marketplaceDiagnostics.checks.map((check) => (
+                      <div
+                        className={`rounded-lg px-3 py-2 ring-1 ${
+                          check.status === "ok"
+                            ? "bg-emerald-50 ring-emerald-100"
+                            : check.status === "warning"
+                              ? "bg-amber-50 ring-amber-100"
+                              : "bg-rose-50 ring-rose-100"
+                        }`}
+                        key={`${check.label}-${check.message}`}
+                      >
+                        <p className="text-xs font-bold uppercase tracking-normal text-black/45">
+                          {check.label}
+                        </p>
+                        <p className="mt-1 text-sm font-semibold text-ink">
+                          {check.message}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
               {syncSummary && (
                 <div className="mt-3 grid gap-2 sm:grid-cols-4">
                   {[
