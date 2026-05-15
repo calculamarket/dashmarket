@@ -413,6 +413,16 @@ type InventoryDisplayRow = {
   capturedAt?: string;
 };
 
+type InventoryValuationRow = InventoryDisplayRow & {
+  title: string;
+  totalQuantity: number;
+  unitSalePrice: number;
+  unitMarketplaceFee: number;
+  unitNetValue: number;
+  investedValue: number;
+  hasPricing: boolean;
+};
+
 type AdvertisingMetricRow = {
   impressions: number | string;
   clicks: number | string;
@@ -1617,6 +1627,60 @@ export function DashmarketDashboard() {
     () => calculateContributionMargins(activeSales, costs, activeAdvertising),
     [activeAdvertising, activeSales, costs]
   );
+  const inventoryValuationRows = useMemo<InventoryValuationRow[]>(() => {
+    const salesBySku = new Map(activeSales.map((sale) => [sale.sku, sale]));
+    const productsBySku = new Map(
+      productOptions.map((product) => [product.sku, product.title])
+    );
+
+    return displayInventoryRows.map((row) => {
+      const sale = salesBySku.get(row.sku);
+      const totalQuantity = row.available + row.reserved + row.notAvailable;
+      const soldUnits = sale?.units ?? 0;
+      const hasPricing = soldUnits > 0;
+      const unitSalePrice = hasPricing && sale ? sale.grossRevenue / soldUnits : 0;
+      const unitMarketplaceFee =
+        hasPricing && sale ? sale.marketplaceFees / soldUnits : 0;
+      const unitNetValue = unitSalePrice - unitMarketplaceFee;
+
+      return {
+        ...row,
+        title: sale?.title ?? productsBySku.get(row.sku) ?? "Produto sem venda recente",
+        totalQuantity,
+        unitSalePrice,
+        unitMarketplaceFee,
+        unitNetValue,
+        investedValue: totalQuantity * unitNetValue,
+        hasPricing
+      };
+    });
+  }, [activeSales, displayInventoryRows, productOptions]);
+  const inventoryValuationTotals = useMemo(() => {
+    const fullRows = inventoryValuationRows.filter(
+      (row) => row.channel.toLowerCase() === "full"
+    );
+
+    return {
+      skuCount: inventoryValuationRows.length,
+      fullSkuCount: fullRows.length,
+      totalQuantity: inventoryValuationRows.reduce(
+        (total, row) => total + row.totalQuantity,
+        0
+      ),
+      availableQuantity: inventoryValuationRows.reduce(
+        (total, row) => total + row.available,
+        0
+      ),
+      fullInvestedValue: fullRows.reduce(
+        (total, row) => total + row.investedValue,
+        0
+      ),
+      investedValue: inventoryValuationRows.reduce(
+        (total, row) => total + row.investedValue,
+        0
+      )
+    };
+  }, [inventoryValuationRows]);
   const salesDetailSources = useMemo(
     () =>
       !shouldUseDemoData
@@ -2289,7 +2353,7 @@ export function DashmarketDashboard() {
       )
       .eq("organization_id", organizationId)
       .order("captured_at", { ascending: false })
-      .limit(2000);
+      .limit(10000);
 
     if (error) throw error;
 
@@ -7559,7 +7623,7 @@ export function DashmarketDashboard() {
                     <h2 className="text-lg font-bold">Estoque por canal de envio</h2>
                     <p className="text-sm text-black/60">
                       {realInventory.length > 0
-                        ? "Ultimo snapshot salvo no Supabase por SKU e canal."
+                        ? "Ultimo snapshot salvo no Supabase com valor liquido por SKU."
                         : "Pronto para receber snapshots do Full e demais modalidades."}
                     </p>
                   </div>
@@ -7580,28 +7644,102 @@ export function DashmarketDashboard() {
                     </button>
                   )}
                 </div>
+                <div className="grid gap-3 border-b border-black/10 p-4 md:grid-cols-3">
+                  <div className="rounded-lg border border-black/10 bg-paper p-3">
+                    <p className="text-xs font-semibold uppercase tracking-normal text-black/50">
+                      SKUs no estoque
+                    </p>
+                    <p className="mt-1 text-2xl font-black">
+                      {formatNumber.format(inventoryValuationTotals.skuCount)}
+                    </p>
+                    <p className="text-xs text-black/50">
+                      Full: {formatNumber.format(inventoryValuationTotals.fullSkuCount)}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-black/10 bg-paper p-3">
+                    <p className="text-xs font-semibold uppercase tracking-normal text-black/50">
+                      Unidades totais
+                    </p>
+                    <p className="mt-1 text-2xl font-black">
+                      {formatNumber.format(inventoryValuationTotals.totalQuantity)}
+                    </p>
+                    <p className="text-xs text-black/50">
+                      Disponiveis:{" "}
+                      {formatNumber.format(inventoryValuationTotals.availableQuantity)}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-black/10 bg-paper p-3">
+                    <p className="text-xs font-semibold uppercase tracking-normal text-black/50">
+                      Valor investido Full
+                    </p>
+                    <p className="mt-1 text-2xl font-black text-sea">
+                      {formatCurrency.format(
+                        inventoryValuationTotals.fullInvestedValue
+                      )}
+                    </p>
+                    <p className="text-xs text-black/50">
+                      Total geral:{" "}
+                      {formatCurrency.format(inventoryValuationTotals.investedValue)}
+                    </p>
+                  </div>
+                </div>
                 <div className="table-scroll overflow-x-auto">
-                  <table className="min-w-[780px] w-full text-left text-sm">
+                  <table className="min-w-[1420px] w-full text-left text-sm">
                     <thead className="bg-black/[0.025] text-xs uppercase tracking-normal text-black/50">
                       <tr>
-                        <th className="px-4 py-3">SKU</th>
+                        <th className="px-4 py-3">SKU / Produto</th>
                         <th className="px-4 py-3">Canal</th>
                         <th className="px-4 py-3">Disponivel</th>
                         <th className="px-4 py-3">Reservado</th>
                         <th className="px-4 py-3">Indisponivel</th>
+                        <th className="px-4 py-3">Total</th>
+                        <th className="px-4 py-3">Venda un.</th>
+                        <th className="px-4 py-3">Taxa ML un.</th>
+                        <th className="px-4 py-3">Liquido un.</th>
+                        <th className="px-4 py-3">Valor investido</th>
                         <th className="px-4 py-3">Status</th>
                         <th className="px-4 py-3">Atualizado</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-black/10">
-                      {displayInventoryRows.map((row) => (
+                      {inventoryValuationRows.map((row) => (
                         <tr key={`${row.sku}:${row.channel}`}>
-                          <td className="px-4 py-3 font-bold">{row.sku}</td>
+                          <td className="px-4 py-3">
+                            <p className="font-bold">{row.sku}</p>
+                            <p className="text-xs text-black/50">{row.title}</p>
+                          </td>
                           <td className="px-4 py-3">{row.channel}</td>
                           <td className="px-4 py-3">{formatNumber.format(row.available)}</td>
                           <td className="px-4 py-3">{formatNumber.format(row.reserved)}</td>
                           <td className="px-4 py-3">
                             {formatNumber.format(row.notAvailable)}
+                          </td>
+                          <td className="px-4 py-3 font-bold">
+                            {formatNumber.format(row.totalQuantity)}
+                          </td>
+                          <td className="px-4 py-3">
+                            {row.hasPricing
+                              ? formatCurrency.format(row.unitSalePrice)
+                              : "Sem venda"}
+                          </td>
+                          <td className="px-4 py-3">
+                            {row.hasPricing
+                              ? formatCurrency.format(row.unitMarketplaceFee)
+                              : "Sem venda"}
+                          </td>
+                          <td className="px-4 py-3 font-bold">
+                            {row.hasPricing
+                              ? formatCurrency.format(row.unitNetValue)
+                              : "Sem venda"}
+                          </td>
+                          <td
+                            className={`px-4 py-3 font-bold ${
+                              row.investedValue < 0 ? "text-berry" : "text-sea"
+                            }`}
+                          >
+                            {row.hasPricing
+                              ? formatCurrency.format(row.investedValue)
+                              : "Sem venda"}
                           </td>
                           <td className="px-4 py-3">
                             <span
