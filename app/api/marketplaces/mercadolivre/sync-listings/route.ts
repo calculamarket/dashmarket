@@ -84,6 +84,8 @@ type ProductRow = {
   internal_sku: string;
 };
 
+type ProductStatus = "active" | "paused" | "archived";
+
 type ListingPayload = {
   organization_id: string;
   marketplace_account_id: string;
@@ -101,6 +103,19 @@ type ListingPayload = {
 
 const MAX_ITEMS_PER_SYNC = 500;
 const BATCH_SIZE = 20;
+
+function mapListingStatusToProductStatus(status?: string | null): ProductStatus {
+  return status === "active" ? "active" : "paused";
+}
+
+function mergeProductStatus(
+  current: ProductStatus,
+  incoming: ProductStatus
+): ProductStatus {
+  if (current === "active" || incoming === "active") return "active";
+  if (current === "paused" || incoming === "paused") return "paused";
+  return "archived";
+}
 
 function getEnv(request: Request) {
   const config = getMercadoLivreServerConfig(new URL(request.url));
@@ -382,15 +397,24 @@ export async function POST(request: Request) {
       );
       const items = await fetchItems(ids, accessToken);
 
-      const productCandidates = new Map<string, { internal_sku: string; title: string }>();
+      const productCandidates = new Map<
+        string,
+        { internal_sku: string; title: string; status: ProductStatus }
+      >();
       const itemSku = new Map<string, string>();
 
       for (const item of items) {
         const sku = extractSellerSku(item);
         itemSku.set(item.id, sku);
+        const incomingStatus = mapListingStatusToProductStatus(item.status);
+        const currentProduct = productCandidates.get(sku);
+
         productCandidates.set(sku, {
           internal_sku: sku,
-          title: item.title
+          title: item.title,
+          status: currentProduct
+            ? mergeProductStatus(currentProduct.status, incomingStatus)
+            : incomingStatus
         });
       }
 
@@ -402,7 +426,7 @@ export async function POST(request: Request) {
               organization_id: organizationId,
               internal_sku: product.internal_sku,
               title: product.title,
-              status: "active"
+              status: product.status
             })),
             { onConflict: "organization_id,internal_sku" }
           );

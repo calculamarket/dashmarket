@@ -68,6 +68,11 @@ type ProductRow = {
   status: ProductStatus;
 };
 
+type MarketplaceListingStatusRow = {
+  seller_sku: string;
+  status: string | null;
+};
+
 type MarketplaceAccountRow = {
   id: string;
   provider: MarketplaceProvider;
@@ -1522,18 +1527,31 @@ export function DashmarketDashboard() {
   const activeSales = shouldUseDemoData ? salesSeed : realSales;
   const activeAdvertising =
     shouldUseDemoData ? adSpendSeed : realAdvertising;
+  const activeProductSkus = useMemo(
+    () =>
+      new Set(
+        realProducts
+          .filter((product) => product.status === "active")
+          .map((product) => product.internal_sku)
+      ),
+    [realProducts]
+  );
   const displayInventoryRows =
-    shouldUseDemoData ? inventoryRows : realInventory;
+    shouldUseDemoData
+      ? inventoryRows
+      : realInventory.filter((row) => activeProductSkus.has(row.sku));
   const displayPromotionRows =
     shouldUseDemoData ? promotionRows : realPromotions;
   const productOptions = useMemo(
     () => {
       const options =
         realProducts.length > 0
-          ? realProducts.map((product) => ({
-              sku: product.internal_sku,
-              title: product.title
-            }))
+          ? realProducts
+              .filter((product) => product.status === "active")
+              .map((product) => ({
+                sku: product.internal_sku,
+                title: product.title
+              }))
           : activeSales.map((sale) => ({ sku: sale.sku, title: sale.title }));
 
       return options.filter((product) => !hiddenSkus.includes(product.sku));
@@ -2253,7 +2271,33 @@ export function DashmarketDashboard() {
     if (productsError) throw productsError;
 
     const products = (productsData ?? []) as ProductRow[];
-    setRealProducts(products);
+
+    const { data: listingStatuses, error: listingStatusesError } =
+      await supabaseClient
+        .from("marketplace_listings")
+        .select("seller_sku, status")
+        .eq("organization_id", organizationId)
+        .eq("provider", "mercadolivre")
+        .limit(10000);
+
+    if (listingStatusesError) throw listingStatusesError;
+
+    const activeListingSkus = new Set(
+      ((listingStatuses ?? []) as MarketplaceListingStatusRow[])
+        .filter((listing) => listing.status === "active")
+        .map((listing) => listing.seller_sku)
+    );
+
+    const mappedProducts =
+      activeListingSkus.size > 0
+        ? products.map((product) => ({
+            ...product,
+            status: (
+              activeListingSkus.has(product.internal_sku) ? "active" : "paused"
+            ) as ProductStatus
+          }))
+        : products;
+    setRealProducts(mappedProducts);
 
     const { data: costsData, error: costsError } = await supabaseClient
       .from("sku_costs")
