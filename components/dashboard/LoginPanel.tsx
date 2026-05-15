@@ -4,6 +4,7 @@ import Link from "next/link";
 import { FormEvent, useState } from "react";
 import { ArrowLeft, LockKeyhole, Mail, ShieldCheck } from "lucide-react";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
+import { ThemeToggle } from "@/components/dashboard/ThemeToggle";
 
 export function LoginPanel() {
   const [email, setEmail] = useState("");
@@ -49,13 +50,16 @@ export function LoginPanel() {
   return (
     <main className="grid min-h-screen place-items-center bg-paper px-4 py-10 text-ink">
       <section className="w-full max-w-md rounded-lg border border-black/10 bg-white p-6 shadow-soft">
-        <Link
-          className="inline-flex h-9 items-center gap-2 rounded-lg bg-paper px-3 text-sm font-semibold text-black/70 ring-1 ring-black/10 hover:bg-black/[0.04]"
-          href="/"
-        >
-          <ArrowLeft aria-hidden className="h-4 w-4" />
-          Voltar
-        </Link>
+        <div className="flex items-center justify-between gap-3">
+          <Link
+            className="inline-flex h-9 items-center gap-2 rounded-lg bg-paper px-3 text-sm font-semibold text-black/70 ring-1 ring-black/10 hover:bg-black/[0.04]"
+            href="/"
+          >
+            <ArrowLeft aria-hidden className="h-4 w-4" />
+            Voltar
+          </Link>
+          <ThemeToggle />
+        </div>
 
         <div className="mt-6 flex items-center gap-3">
           <span className="grid h-11 w-11 place-items-center rounded-lg bg-ink text-sm font-black text-white">

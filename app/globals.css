@@ -17,15 +17,65 @@
   --rule-strong: #3a3a36;
   --hazard: #e61919;
   --hazard-soft: rgba(230, 25, 25, 0.12);
+  --accent-foreground: var(--crt-deep);
   --green: #4af626;
   --green-soft: rgba(74, 246, 38, 0.12);
+  --positive-foreground: var(--crt-deep);
   --amber: #e0a819;
   --amber-soft: rgba(224, 168, 25, 0.12);
   --cyan-soft: rgba(56, 189, 248, 0.12);
+  --grid-line: rgba(255, 255, 255, 0.025);
+  --grid-line-soft: rgba(255, 255, 255, 0.02);
+  --red-glow: rgba(230, 25, 25, 0.12);
+  --scanline: rgba(255, 255, 255, 0.035);
+  --vignette-outer: rgba(0, 0, 0, 0.64);
+  --vignette-top: rgba(255, 255, 255, 0.035);
+  --vignette-bottom: rgba(0, 0, 0, 0.34);
+  --panel-sheen: rgba(255, 255, 255, 0.035);
+  --panel-accent: rgba(230, 25, 25, 0.08);
+  --subtle-surface: rgba(236, 236, 234, 0.075);
+  --subtle-surface-strong: rgba(236, 236, 234, 0.1);
+  --selection-foreground: var(--crt-deep);
   --background: var(--crt);
   --foreground: var(--phosphor);
   --display: "Archivo Black", Impact, sans-serif;
   --mono: "JetBrains Mono", "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+  --crt: #f4f1e8;
+  --crt-deep: #e8e1d2;
+  --crt-panel: #fffdf5;
+  --crt-panel-soft: #f7f0e2;
+  --phosphor: #171813;
+  --phosphor-soft: #505248;
+  --phosphor-muted: #77786f;
+  --rule: #d9d0be;
+  --rule-strong: #b8ad99;
+  --hazard: #b91c1c;
+  --hazard-soft: rgba(185, 28, 28, 0.11);
+  --accent-foreground: #fffaf0;
+  --green: #166534;
+  --green-soft: rgba(22, 101, 52, 0.12);
+  --positive-foreground: #fffaf0;
+  --amber: #9a6700;
+  --amber-soft: rgba(154, 103, 0, 0.12);
+  --cyan-soft: rgba(2, 132, 199, 0.1);
+  --grid-line: rgba(20, 20, 16, 0.055);
+  --grid-line-soft: rgba(20, 20, 16, 0.035);
+  --red-glow: rgba(185, 28, 28, 0.1);
+  --scanline: rgba(20, 20, 16, 0.045);
+  --vignette-outer: rgba(116, 98, 72, 0.14);
+  --vignette-top: rgba(255, 255, 255, 0.32);
+  --vignette-bottom: rgba(80, 64, 42, 0.1);
+  --panel-sheen: rgba(255, 255, 255, 0.46);
+  --panel-accent: rgba(185, 28, 28, 0.06);
+  --subtle-surface: rgba(20, 20, 16, 0.055);
+  --subtle-surface-strong: rgba(20, 20, 16, 0.09);
+  --selection-foreground: #fffaf0;
+  --background: var(--crt);
+  --foreground: var(--phosphor);
 }
 
 * {
@@ -41,9 +91,9 @@ body {
   min-height: 100vh;
   margin: 0;
   background:
-    linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px),
-    radial-gradient(circle at 50% 0%, rgba(230, 25, 25, 0.12), transparent 34rem),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px),
+    linear-gradient(180deg, var(--grid-line-soft) 1px, transparent 1px),
+    radial-gradient(circle at 50% 0%, var(--red-glow), transparent 34rem),
     var(--crt);
   background-size: 44px 44px, 44px 44px, auto, auto;
   color: var(--foreground);
@@ -65,8 +115,8 @@ body::before {
   z-index: 80;
   background: repeating-linear-gradient(
     0deg,
-    rgba(255, 255, 255, 0.035) 0,
-    rgba(255, 255, 255, 0.035) 1px,
+    var(--scanline) 0,
+    var(--scanline) 1px,
     transparent 1px,
     transparent 4px
   );
@@ -77,8 +127,8 @@ body::before {
 body::after {
   z-index: 79;
   background:
-    radial-gradient(circle at center, transparent 42%, rgba(0, 0, 0, 0.64) 100%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent 18%, rgba(0, 0, 0, 0.34));
+    radial-gradient(circle at center, transparent 42%, var(--vignette-outer) 100%),
+    linear-gradient(180deg, var(--vignette-top), transparent 18%, var(--vignette-bottom));
 }
 
 body > * {
@@ -139,7 +189,7 @@ button:disabled {
 
 ::selection {
   background: var(--hazard);
-  color: var(--crt-deep);
+  color: var(--selection-foreground);
 }
 
 .table-scroll {
@@ -179,7 +229,7 @@ button:disabled {
   a.bg-ink,
   .bg-sea {
     background-color: var(--hazard) !important;
-    color: var(--crt-deep) !important;
+    color: var(--accent-foreground) !important;
   }
 
   .bg-black\/15,
@@ -187,12 +237,12 @@ button:disabled {
   .bg-black\/\[0\.03\],
   .hover\:bg-black\/\[0\.03\]:hover,
   .hover\:bg-black\/\[0\.04\]:hover {
-    background-color: rgba(236, 236, 234, 0.055) !important;
+    background-color: var(--subtle-surface) !important;
   }
 
   .bg-white\/10,
   .hover\:bg-white\/20:hover {
-    background-color: rgba(236, 236, 234, 0.075) !important;
+    background-color: var(--subtle-surface) !important;
   }
 
   .bg-teal-50,
@@ -221,7 +271,7 @@ button:disabled {
   .bg-emerald-200,
   .bg-green-200 {
     background-color: var(--green) !important;
-    color: var(--crt-deep) !important;
+    color: var(--positive-foreground) !important;
   }
 
   .text-ink,
@@ -306,8 +356,8 @@ header,
 nav,
 dialog {
   background-image:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent 32px),
-    linear-gradient(90deg, rgba(230, 25, 25, 0.08), transparent 18rem);
+    linear-gradient(180deg, var(--panel-sheen), transparent 32px),
+    linear-gradient(90deg, var(--panel-accent), transparent 18rem);
 }
 
 input,
@@ -353,7 +403,7 @@ a.bg-ink,
 a.bg-ink *,
 [aria-selected="true"].bg-sea,
 [aria-selected="true"].bg-sea * {
-  color: var(--crt-deep) !important;
+  color: var(--accent-foreground) !important;
 }
 
 table {

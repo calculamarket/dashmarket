@@ -35,6 +35,7 @@ import {
 import { getMarketplaceAdapter, listMarketplaceAdapters } from "@/lib/marketplaces/registry";
 import type { MarketplaceProvider } from "@/lib/marketplaces/types";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
+import { ThemeToggle } from "@/components/dashboard/ThemeToggle";
 
 type ViewKey =
   | "margem"
@@ -4561,6 +4562,7 @@ export function DashmarketDashboard() {
             </div>
 
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+              <ThemeToggle />
               <div className="flex rounded-lg bg-white p-1 ring-1 ring-black/10">
                 {listMarketplaceAdapters().slice(0, 3).map((adapter) => (
                   <button

@@ -13,8 +13,24 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="pt-BR">
-      <body>{children}</body>
+    <html lang="pt-BR" suppressHydrationWarning>
+      <body>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              (() => {
+                try {
+                  const savedTheme = window.localStorage.getItem("dashmarket-theme");
+                  document.documentElement.dataset.theme = savedTheme === "light" ? "light" : "dark";
+                } catch {
+                  document.documentElement.dataset.theme = "dark";
+                }
+              })();
+            `
+          }}
+        />
+        {children}
+      </body>
     </html>
   );
 }
