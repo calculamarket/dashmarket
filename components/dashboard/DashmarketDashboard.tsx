@@ -1007,6 +1007,10 @@ function makeLocalId(prefix: string) {
   return `${prefix}-${Date.now()}`;
 }
 
+function defaultOrganizationSlug(userId: string) {
+  return `dashmarket-${userId.replace(/-/g, "").slice(0, 12)}`;
+}
+
 function isMissingRelationError(error: unknown) {
   if (!error || typeof error !== "object") return false;
 
@@ -2548,8 +2552,25 @@ export function DashmarketDashboard() {
 
         if (organizationsError) throw organizationsError;
 
-        const currentOrganization =
+        let currentOrganization =
           ((organizationsData ?? [])[0] as Organization | undefined) ?? null;
+
+        if (!currentOrganization) {
+          const { data: createdOrganization, error: createOrganizationError } =
+            await supabaseClient
+              .from("organizations")
+              .insert({
+                created_by: session.user.id,
+                name: "DASHMARKET",
+                slug: defaultOrganizationSlug(session.user.id)
+              })
+              .select("id, name, slug")
+              .single();
+
+          if (createOrganizationError) throw createOrganizationError;
+
+          currentOrganization = createdOrganization as Organization;
+        }
 
         if (!isMounted) return;
 
@@ -2579,7 +2600,7 @@ export function DashmarketDashboard() {
           setPersonalFinanceEntries(personalFinanceSeed);
           setPersonalLoans(personalLoanSeed);
           setMarketplaceAccounts([]);
-          setDataMessage("Usuario autenticado, mas sem empresa vinculada.");
+          setDataMessage("Usuario autenticado. Criando empresa DASHMARKET.");
         }
       } catch (error) {
         if (!isMounted) return;
@@ -2605,8 +2626,14 @@ export function DashmarketDashboard() {
 
     loadWorkspace();
 
+    const authSubscription = supabaseClient?.auth.onAuthStateChange((event) => {
+      if (!isMounted || event === "INITIAL_SESSION") return;
+      void loadWorkspace();
+    });
+
     return () => {
       isMounted = false;
+      authSubscription?.data.subscription.unsubscribe();
     };
   }, [
     loadCostCenter,
