@@ -969,6 +969,12 @@ function normalizeSearchText(value: string) {
     .trim();
 }
 
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value
+  );
+}
+
 function inputNumber(value: number) {
   return value > 0 ? value.toFixed(2) : "";
 }
@@ -2926,19 +2932,57 @@ export function DashmarketDashboard() {
   async function deleteCompanyFinanceEntry(entry: FinanceEntry) {
     if (!window.confirm(`Excluir o lancamento "${entry.title}"?`)) return;
 
+    const removeLocalEntry = () => {
+      setCompanyFinanceEntries((current) =>
+        current.filter((item) => item.id !== entry.id)
+      );
+      if (editingCompanyFinanceId === entry.id) {
+        resetCompanyFinanceForm();
+      }
+    };
+
+    if (!isUuid(entry.id)) {
+      removeLocalEntry();
+      setDataMessage("Lancamento da empresa removido da lista.");
+      return;
+    }
+
     if (supabaseClient && organization) {
       setIsSavingCompanyFinance(true);
 
       try {
-        const { error } = await supabaseClient
+        const { data: deletedEntry, error } = await supabaseClient
           .from("company_financial_entries")
           .delete()
-          .eq("id", entry.id);
+          .eq("id", entry.id)
+          .eq("organization_id", organization.id)
+          .select("id")
+          .maybeSingle();
 
         if (error) throw error;
+
+        if (!deletedEntry) {
+          removeLocalEntry();
+          setDataMessage(
+            "Lancamento removido da tela, mas nao foi encontrado no banco. Se ele voltar ao recarregar, confira as permissoes do Supabase."
+          );
+          return;
+        }
+
         await loadCompanyFinance(organization.id);
+        if (editingCompanyFinanceId === entry.id) {
+          resetCompanyFinanceForm();
+        }
         setDataMessage("Lancamento da empresa excluido.");
       } catch (error) {
+        if (isMissingRelationError(error)) {
+          removeLocalEntry();
+          setDataMessage(
+            "Lancamento removido da lista. Execute a migration do financeiro para salvar exclusoes no Supabase."
+          );
+          return;
+        }
+
         setDataMessage(
           error instanceof Error
             ? error.message
@@ -2951,9 +2995,7 @@ export function DashmarketDashboard() {
       return;
     }
 
-    setCompanyFinanceEntries((current) =>
-      current.filter((item) => item.id !== entry.id)
-    );
+    removeLocalEntry();
     setDataMessage("Lancamento da empresa removido em modo demonstracao.");
   }
 
