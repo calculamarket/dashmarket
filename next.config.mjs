@@ -15,17 +15,18 @@ const supabasePublicKey = firstEnv([
   "SUPABASE_ANON_KEY",
   "SUPABASE_PUBLISHABLE_KEY"
 ]);
+const dashmarketDefaultSupabaseUrl = "https://vbbuzivobekywrslizps.supabase.co";
+const dashmarketDefaultSupabasePublishableKey =
+  "sb_publishable_NG6umNstsmZbXGrGxpatBA_-HK4JHdY";
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   env: {
-    ...(supabaseUrl ? { NEXT_PUBLIC_SUPABASE_URL: supabaseUrl } : {}),
-    ...(supabasePublicKey
-      ? {
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: supabasePublicKey,
-          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: supabasePublicKey
-        }
-      : {})
+    NEXT_PUBLIC_SUPABASE_URL: supabaseUrl ?? dashmarketDefaultSupabaseUrl,
+    NEXT_PUBLIC_SUPABASE_ANON_KEY:
+      supabasePublicKey ?? dashmarketDefaultSupabasePublishableKey,
+    NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY:
+      supabasePublicKey ?? dashmarketDefaultSupabasePublishableKey
   },
   outputFileTracingRoot: process.cwd(),
   reactStrictMode: true

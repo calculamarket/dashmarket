@@ -53,6 +53,9 @@ Para o Supabase no navegador, use `NEXT_PUBLIC_SUPABASE_ANON_KEY` ou
 `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`. Se a Vercel estiver com
 `SUPABASE_ANON_KEY` ou `SUPABASE_PUBLISHABLE_KEY` sem o prefixo `NEXT_PUBLIC_`,
 o build tambem publica esse valor para o app.
+Como fallback, o projeto ja traz a URL e a chave publishable publica do Supabase
+do DASHMARKET para evitar que o login quebre quando a Vercel nao expor variaveis
+publicas no bundle.
 
 ## Supabase
 

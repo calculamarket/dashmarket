@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getMercadoLivreOAuthConfig } from "@/lib/marketplaces/mercadolivre-oauth";
+import { resolvePublicSupabaseConfig } from "@/lib/supabase/public-config";
 
 type DiagnosticStatus = "ok" | "warning" | "error";
 
@@ -43,16 +44,6 @@ function isMissingRelationError(error: unknown) {
   return maybeError.code === "42P01" || message.includes("does not exist");
 }
 
-function readFirstEnvValue(keys: string[]) {
-  for (const key of keys) {
-    const value = process.env[key]?.trim();
-
-    if (value) return value;
-  }
-
-  return null;
-}
-
 function jsonResponse(checks: DiagnosticCheck[], extra: Record<string, unknown> = {}) {
   return NextResponse.json({
     checks,
@@ -66,16 +57,9 @@ export async function POST(request: Request) {
   const requestUrl = new URL(request.url);
   const checks: DiagnosticCheck[] = [];
   const oauthConfig = getMercadoLivreOAuthConfig(requestUrl);
-  const supabaseUrl = readFirstEnvValue([
-    "NEXT_PUBLIC_SUPABASE_URL",
-    "SUPABASE_URL"
-  ]);
-  const supabaseAnonKey = readFirstEnvValue([
-    "NEXT_PUBLIC_SUPABASE_ANON_KEY",
-    "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
-    "SUPABASE_ANON_KEY",
-    "SUPABASE_PUBLISHABLE_KEY"
-  ]);
+  const publicSupabaseConfig = resolvePublicSupabaseConfig();
+  const supabaseUrl = publicSupabaseConfig?.url ?? null;
+  const supabaseAnonKey = publicSupabaseConfig?.anonKey ?? null;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
   const authHeader = request.headers.get("authorization") ?? "";
   const accessToken = authHeader.replace(/^Bearer\s+/i, "").trim();

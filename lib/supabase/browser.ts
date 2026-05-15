@@ -1,34 +1,16 @@
 "use client";
 
 import { createClient } from "@supabase/supabase-js";
-
-function readFirstEnvValue(keys: string[]) {
-  for (const key of keys) {
-    const value = process.env[key]?.trim();
-
-    if (value) return value;
-  }
-
-  return null;
-}
+import { resolvePublicSupabaseConfig } from "@/lib/supabase/public-config";
 
 export function createBrowserSupabaseClient() {
-  const supabaseUrl = readFirstEnvValue([
-    "NEXT_PUBLIC_SUPABASE_URL",
-    "SUPABASE_URL"
-  ]);
-  const supabaseAnonKey = readFirstEnvValue([
-    "NEXT_PUBLIC_SUPABASE_ANON_KEY",
-    "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
-    "SUPABASE_ANON_KEY",
-    "SUPABASE_PUBLISHABLE_KEY"
-  ]);
+  const config = resolvePublicSupabaseConfig();
 
-  if (!supabaseUrl || !supabaseAnonKey) {
+  if (!config) {
     throw new Error("Supabase ainda nao foi configurado no ambiente.");
   }
 
-  return createClient(supabaseUrl, supabaseAnonKey, {
+  return createClient(config.url, config.anonKey, {
     auth: {
       autoRefreshToken: true,
       detectSessionInUrl: true,
