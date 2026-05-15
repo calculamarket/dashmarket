@@ -99,7 +99,7 @@ export async function POST(request: Request) {
     supabaseUrl && supabaseAnonKey ? "ok" : "error",
     supabaseUrl && supabaseAnonKey
       ? "Supabase publico configurado."
-      : "Configure NEXT_PUBLIC_SUPABASE_URL e NEXT_PUBLIC_SUPABASE_ANON_KEY."
+      : "Configure as variaveis publicas do Supabase ou use o fallback do DASHMARKET."
   );
   addCheck(
     checks,

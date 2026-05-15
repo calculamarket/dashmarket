@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { getMercadoLivreServerConfig } from "@/lib/marketplaces/mercadolivre-server-config";
 
 type MarketplaceAccount = {
   id: string;
@@ -156,14 +157,12 @@ const MAX_ORDERS_PER_SYNC = 10000;
 const ORDERS_PAGE_SIZE = 50;
 const DEFAULT_DAYS_BACK = 30;
 
-function getEnv() {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  const clientId = process.env.MERCADOLIVRE_CLIENT_ID;
-  const clientSecret = process.env.MERCADOLIVRE_CLIENT_SECRET;
+function getEnv(request: Request) {
+  const config = getMercadoLivreServerConfig(new URL(request.url));
+  const { clientId, clientSecret, serviceRoleKey, supabaseUrl } = config;
 
-  if (!supabaseUrl || !serviceRoleKey || !clientId || !clientSecret) {
-    throw new Error("Variaveis de ambiente incompletas.");
+  if (!clientId || !clientSecret) {
+    throw new Error("Variaveis do Mercado Livre incompletas.");
   }
 
   return { clientId, clientSecret, serviceRoleKey, supabaseUrl };
@@ -494,7 +493,7 @@ function normalizeOrder(
 
 export async function POST(request: Request) {
   try {
-    const { clientId, clientSecret, serviceRoleKey, supabaseUrl } = getEnv();
+    const { clientId, clientSecret, serviceRoleKey, supabaseUrl } = getEnv(request);
     const authorization = request.headers.get("authorization");
     const token = authorization?.replace(/^Bearer\s+/i, "");
     const body = (await request.json()) as {

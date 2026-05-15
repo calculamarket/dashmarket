@@ -1,9 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import {
-  getMercadoLivreOAuthConfig,
-  resolveAppUrl
-} from "@/lib/marketplaces/mercadolivre-oauth";
+import { resolveAppUrl } from "@/lib/marketplaces/mercadolivre-oauth";
+import { getMercadoLivreServerConfig } from "@/lib/marketplaces/mercadolivre-server-config";
 
 type OAuthState = {
   organizationId?: string;
@@ -70,44 +68,29 @@ export async function GET(request: Request) {
   const requestUrl = new URL(request.url);
   const code = requestUrl.searchParams.get("code");
   const state = parseState(requestUrl.searchParams.get("state"));
-  const oauthConfig = getMercadoLivreOAuthConfig(requestUrl);
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   const appUrl = resolveAppUrl(requestUrl);
-  const missingVariables = [
-    ...oauthConfig.missingVariables,
-    ...[
-      ["NEXT_PUBLIC_SUPABASE_URL", supabaseUrl],
-      ["SUPABASE_SERVICE_ROLE_KEY", serviceRoleKey]
-    ]
-      .filter(([, value]) => !value)
-      .map(([key]) => key)
-  ];
 
   if (!code || !state.organizationId) {
     return redirectWithStatus(appUrl, "invalid_callback");
   }
 
-  if (
-    missingVariables.length > 0 ||
-    !supabaseUrl ||
-    !serviceRoleKey ||
-    !oauthConfig.clientId ||
-    !oauthConfig.clientSecret
-  ) {
+  let serverConfig: ReturnType<typeof getMercadoLivreServerConfig>;
+  try {
+    serverConfig = getMercadoLivreServerConfig(requestUrl);
+  } catch (error) {
     return redirectWithStatus(
       appUrl,
       "missing_env",
-      `Faltam variaveis: ${missingVariables.join(", ")}.`
+      error instanceof Error ? error.message : "Variaveis de ambiente incompletas."
     );
   }
 
   const tokenPayload = new URLSearchParams({
     grant_type: "authorization_code",
-    client_id: oauthConfig.clientId,
-    client_secret: oauthConfig.clientSecret,
+    client_id: serverConfig.clientId ?? "",
+    client_secret: serverConfig.clientSecret ?? "",
     code,
-    redirect_uri: oauthConfig.redirectUri
+    redirect_uri: serverConfig.redirectUri
   });
 
   const tokenResponse = await fetch("https://api.mercadolibre.com/oauth/token", {
@@ -148,7 +131,7 @@ export async function GET(request: Request) {
   }
 
   const user = (await userResponse.json()) as MercadoLivreUser;
-  const supabase = createClient(supabaseUrl, serviceRoleKey, {
+  const supabase = createClient(serverConfig.supabaseUrl, serverConfig.serviceRoleKey, {
     auth: { persistSession: false }
   });
   const fallbackName = [user.first_name, user.last_name].filter(Boolean).join(" ");

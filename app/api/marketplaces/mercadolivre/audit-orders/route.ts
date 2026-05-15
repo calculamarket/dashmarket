@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { getMercadoLivreServerConfig } from "@/lib/marketplaces/mercadolivre-server-config";
 
 type MarketplaceAccount = {
   id: string;
@@ -139,17 +140,10 @@ type LocalOrder = {
 
 const REVENUE_STATUSES = new Set(["paid"]);
 
-function getEnv() {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  const clientId = process.env.MERCADOLIVRE_CLIENT_ID;
-  const clientSecret = process.env.MERCADOLIVRE_CLIENT_SECRET;
-
-  if (!supabaseUrl || !serviceRoleKey) {
-    throw new Error("Variaveis do Supabase incompletas.");
-  }
-
-  return { clientId, clientSecret, serviceRoleKey, supabaseUrl };
+function getEnv(request: Request) {
+  return getMercadoLivreServerConfig(new URL(request.url), {
+    requireMercadoLivreCredentials: false
+  });
 }
 
 function toNumber(value: unknown) {
@@ -344,7 +338,7 @@ function summarizeRemoteOrder(
 
 export async function POST(request: Request) {
   try {
-    const { clientId, clientSecret, serviceRoleKey, supabaseUrl } = getEnv();
+    const { clientId, clientSecret, serviceRoleKey, supabaseUrl } = getEnv(request);
     const authorization = request.headers.get("authorization");
     const token = authorization?.replace(/^Bearer\s+/i, "");
     const body = (await request.json()) as {
