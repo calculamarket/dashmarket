@@ -9,15 +9,15 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        ink: "#17211f",
-        paper: "#f7f4ec",
-        moss: "#4a6f54",
-        sea: "#0f766e",
-        clay: "#b45309",
-        berry: "#9f1239"
+        ink: "#ececea",
+        paper: "#0b0b0b",
+        moss: "#4af626",
+        sea: "#e61919",
+        clay: "#e0a819",
+        berry: "#e61919"
       },
       boxShadow: {
-        soft: "0 20px 50px rgba(23, 33, 31, 0.10)"
+        soft: "none"
       }
     }
   },
