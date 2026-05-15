@@ -35,6 +35,13 @@ SUPABASE_SERVICE_ROLE_KEY=
 MERCADOLIVRE_CLIENT_ID=
 MERCADOLIVRE_CLIENT_SECRET=
 MERCADOLIVRE_REDIRECT_URI=http://localhost:3000/api/marketplaces/mercadolivre/callback
+WHATSAPP_VERIFY_TOKEN=
+WHATSAPP_ACCESS_TOKEN=
+WHATSAPP_PHONE_NUMBER_ID=
+WHATSAPP_APP_SECRET=
+WHATSAPP_GRAPH_VERSION=v25.0
+DASHMARKET_WHATSAPP_ALLOWED_PHONES=5511999999999
+DASHMARKET_WHATSAPP_ORGANIZATION_ID=
 ```
 
 ## Supabase
@@ -67,6 +74,28 @@ Fluxo planejado:
 4. A Edge Function troca o `code` por tokens e consulta `/users/me`.
 5. A conta e as credenciais sao salvas no Supabase.
 6. As notificacoes do Mercado Livre entram pela Edge Function de eventos.
+
+## WhatsApp
+
+Rota do assistente:
+
+- `GET /api/whatsapp/webhook` para verificacao do webhook da Meta.
+- `POST /api/whatsapp/webhook` para receber perguntas e responder pelo WhatsApp.
+
+Callback URL na Meta/Vercel:
+
+```bash
+https://SEU-DOMINIO.vercel.app/api/whatsapp/webhook
+```
+
+O assistente responde perguntas simples como:
+
+- `qual e meu lucro deste mes?`
+- `quanto vendi ontem?`
+- `quantos pedidos tive hoje?`
+- `como esta o ADS deste mes?`
+
+Para autorizar seu telefone, execute a migration `20260515010000_whatsapp_assistant.sql` e cadastre o numero em `whatsapp_contacts` com DDI/DDD apenas em numeros, por exemplo `5511999999999`. Em projetos de uma empresa só, tambem e possivel usar `DASHMARKET_WHATSAPP_ALLOWED_PHONES` e `DASHMARKET_WHATSAPP_ORGANIZATION_ID`.
 
 ## Preparacao para outros marketplaces
 
