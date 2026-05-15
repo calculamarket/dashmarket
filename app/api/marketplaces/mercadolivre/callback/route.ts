@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import {
+  missingMercadoLivreConnectionVariables,
+  resolveAppUrl,
+  resolveMercadoLivreRedirectUri
+} from "@/lib/marketplaces/mercadolivre-oauth";
 
 type OAuthState = {
   organizationId?: string;
@@ -31,27 +36,73 @@ function parseState(state: string | null): OAuthState {
   }
 }
 
-function redirectWithStatus(appUrl: string, status: string) {
-  return NextResponse.redirect(`${appUrl}/?ml_status=${status}`);
+function redirectWithStatus(appUrl: string, status: string, detail?: string) {
+  const redirectUrl = new URL("/", appUrl);
+  redirectUrl.searchParams.set("ml_status", status);
+
+  if (detail) {
+    redirectUrl.searchParams.set("ml_detail", detail);
+  }
+
+  return NextResponse.redirect(redirectUrl);
+}
+
+function tokenErrorDetail(status: number, body: string) {
+  try {
+    const payload = JSON.parse(body) as {
+      error?: string;
+      message?: string;
+      error_description?: string;
+    };
+    const detail = [
+      payload.error,
+      payload.error_description ?? payload.message
+    ]
+      .filter(Boolean)
+      .join(": ");
+
+    return detail ? detail.slice(0, 240) : `HTTP ${status}`;
+  } catch {
+    return `HTTP ${status}`;
+  }
 }
 
 export async function GET(request: Request) {
   const requestUrl = new URL(request.url);
   const code = requestUrl.searchParams.get("code");
   const state = parseState(requestUrl.searchParams.get("state"));
-  const redirectUri = process.env.MERCADOLIVRE_REDIRECT_URI;
+  const redirectUri = resolveMercadoLivreRedirectUri(requestUrl);
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   const clientId = process.env.MERCADOLIVRE_CLIENT_ID;
   const clientSecret = process.env.MERCADOLIVRE_CLIENT_SECRET;
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? requestUrl.origin;
+  const appUrl = resolveAppUrl(requestUrl);
+  const missingVariables = [
+    ...missingMercadoLivreConnectionVariables(),
+    ...[
+      ["NEXT_PUBLIC_SUPABASE_URL", supabaseUrl],
+      ["SUPABASE_SERVICE_ROLE_KEY", serviceRoleKey]
+    ]
+      .filter(([, value]) => !value)
+      .map(([key]) => key)
+  ];
 
   if (!code || !state.organizationId) {
     return redirectWithStatus(appUrl, "invalid_callback");
   }
 
-  if (!redirectUri || !supabaseUrl || !serviceRoleKey || !clientId || !clientSecret) {
-    return redirectWithStatus(appUrl, "missing_env");
+  if (
+    missingVariables.length > 0 ||
+    !supabaseUrl ||
+    !serviceRoleKey ||
+    !clientId ||
+    !clientSecret
+  ) {
+    return redirectWithStatus(
+      appUrl,
+      "missing_env",
+      `Faltam variaveis: ${missingVariables.join(", ")}.`
+    );
   }
 
   const tokenPayload = new URLSearchParams({
@@ -72,11 +123,16 @@ export async function GET(request: Request) {
   });
 
   if (!tokenResponse.ok) {
+    const tokenResponseBody = await tokenResponse.text();
     console.error("Mercado Livre token exchange failed", {
       status: tokenResponse.status,
-      body: await tokenResponse.text()
+      body: tokenResponseBody
     });
-    return redirectWithStatus(appUrl, "token_error");
+    return redirectWithStatus(
+      appUrl,
+      "token_error",
+      tokenErrorDetail(tokenResponse.status, tokenResponseBody)
+    );
   }
 
   const token = (await tokenResponse.json()) as MercadoLivreTokenResponse;

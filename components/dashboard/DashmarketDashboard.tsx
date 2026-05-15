@@ -3673,13 +3673,16 @@ export function DashmarketDashboard() {
       const response = await fetch(
         `/api/marketplaces/mercadolivre/auth-url?organizationId=${organization.id}&siteId=MLB`
       );
-      const payload = (await response.json()) as { url?: string; error?: string };
+      const payload = await readApiPayload<{ url?: string }>(response);
+      const authPayload = payload as { url?: string } & ApiErrorPayload;
 
-      if (!response.ok || !payload.url) {
-        throw new Error(payload.error ?? "Nao foi possivel iniciar a conexao.");
+      if (!response.ok || !authPayload.url) {
+        throw new Error(
+          apiErrorMessage(payload, "Nao foi possivel iniciar a conexao.")
+        );
       }
 
-      window.location.href = payload.url;
+      window.location.href = authPayload.url;
     } catch (error) {
       setDataMessage(
         error instanceof Error
@@ -4053,6 +4056,7 @@ export function DashmarketDashboard() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const status = params.get("ml_status");
+    const detail = params.get("ml_detail");
 
     if (!status) return;
 
@@ -4066,7 +4070,8 @@ export function DashmarketDashboard() {
       save_error: "Conexao autorizada, mas nao foi possivel salvar a conta no Supabase."
     };
 
-    setDataMessage(messages[status] ?? "Retorno do Mercado Livre recebido.");
+    const message = messages[status] ?? "Retorno do Mercado Livre recebido.";
+    setDataMessage(detail ? `${message} Detalhe: ${detail}` : message);
     window.history.replaceState({}, "", window.location.pathname);
   }, []);
 

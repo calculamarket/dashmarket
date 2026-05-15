@@ -1,4 +1,8 @@
 import { NextResponse } from "next/server";
+import {
+  missingMercadoLivreConnectionVariables,
+  resolveMercadoLivreRedirectUri
+} from "@/lib/marketplaces/mercadolivre-oauth";
 import { mercadoLivreAdapter } from "@/lib/marketplaces/mercadolivre";
 
 export async function GET(request: Request) {
@@ -6,7 +10,8 @@ export async function GET(request: Request) {
   const organizationId = url.searchParams.get("organizationId");
   const siteId = url.searchParams.get("siteId") ?? "MLB";
   const clientId = process.env.MERCADOLIVRE_CLIENT_ID;
-  const redirectUri = process.env.MERCADOLIVRE_REDIRECT_URI;
+  const redirectUri = resolveMercadoLivreRedirectUri(url);
+  const missingVariables = missingMercadoLivreConnectionVariables();
 
   if (!organizationId) {
     return NextResponse.json(
@@ -15,9 +20,13 @@ export async function GET(request: Request) {
     );
   }
 
-  if (!clientId || !redirectUri || !mercadoLivreAdapter.buildAuthorizationUrl) {
+  if (missingVariables.length > 0 || !clientId || !mercadoLivreAdapter.buildAuthorizationUrl) {
     return NextResponse.json(
-      { error: "Mercado Livre ainda nao foi configurado no ambiente." },
+      {
+        error: "Mercado Livre ainda nao foi configurado no ambiente.",
+        details: `Faltam variaveis: ${missingVariables.join(", ")}.`,
+        hint: "Configure essas variaveis na Vercel e publique novamente o projeto."
+      },
       { status: 500 }
     );
   }
@@ -36,6 +45,7 @@ export async function GET(request: Request) {
       state,
       siteId
     }),
+    redirectUri,
     state
   });
 }

@@ -28,13 +28,13 @@ Depois acesse `http://localhost:3000`.
 Use `.env.example` como base:
 
 ```bash
-NEXT_PUBLIC_APP_URL=http://localhost:3000
+NEXT_PUBLIC_APP_URL=
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
 MERCADOLIVRE_CLIENT_ID=
 MERCADOLIVRE_CLIENT_SECRET=
-MERCADOLIVRE_REDIRECT_URI=http://localhost:3000/api/marketplaces/mercadolivre/callback
+MERCADOLIVRE_REDIRECT_URI=
 WHATSAPP_VERIFY_TOKEN=
 WHATSAPP_ACCESS_TOKEN=
 WHATSAPP_PHONE_NUMBER_ID=
@@ -75,9 +75,18 @@ Fluxo planejado:
 1. A tela solicita uma URL de autorizacao para uma organizacao.
 2. O vendedor autoriza o aplicativo no Mercado Livre.
 3. O callback recebe o `code`.
-4. A Edge Function troca o `code` por tokens e consulta `/users/me`.
+4. A rota de callback troca o `code` por tokens e consulta `/users/me`.
 5. A conta e as credenciais sao salvas no Supabase.
 6. As notificacoes do Mercado Livre entram pela Edge Function de eventos.
+
+Em producao, deixe `NEXT_PUBLIC_APP_URL` e `MERCADOLIVRE_REDIRECT_URI`
+vazias ou configure ambas com o dominio publicado. Se elas estiverem com
+`localhost` na Vercel, o app ignora esse valor e usa o dominio atual para evitar
+erro no OAuth. No aplicativo do Mercado Livre, cadastre a URL de callback:
+
+```bash
+https://dashmarketml.vercel.app/api/marketplaces/mercadolivre/callback
+```
 
 ## WhatsApp
 
