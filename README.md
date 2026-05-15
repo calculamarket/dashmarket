@@ -49,6 +49,11 @@ DASHMARKET_WHATSAPP_ALLOWED_PHONES=5511999999999
 DASHMARKET_WHATSAPP_ORGANIZATION_ID=
 ```
 
+Para o Supabase no navegador, use `NEXT_PUBLIC_SUPABASE_ANON_KEY` ou
+`NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`. Se a Vercel estiver com
+`SUPABASE_ANON_KEY` ou `SUPABASE_PUBLISHABLE_KEY` sem o prefixo `NEXT_PUBLIC_`,
+o build tambem publica esse valor para o app.
+
 ## Supabase
 
 A migration principal esta em:

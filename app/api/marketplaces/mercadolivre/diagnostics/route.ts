@@ -43,6 +43,16 @@ function isMissingRelationError(error: unknown) {
   return maybeError.code === "42P01" || message.includes("does not exist");
 }
 
+function readFirstEnvValue(keys: string[]) {
+  for (const key of keys) {
+    const value = process.env[key]?.trim();
+
+    if (value) return value;
+  }
+
+  return null;
+}
+
 function jsonResponse(checks: DiagnosticCheck[], extra: Record<string, unknown> = {}) {
   return NextResponse.json({
     checks,
@@ -56,8 +66,16 @@ export async function POST(request: Request) {
   const requestUrl = new URL(request.url);
   const checks: DiagnosticCheck[] = [];
   const oauthConfig = getMercadoLivreOAuthConfig(requestUrl);
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
+  const supabaseUrl = readFirstEnvValue([
+    "NEXT_PUBLIC_SUPABASE_URL",
+    "SUPABASE_URL"
+  ]);
+  const supabaseAnonKey = readFirstEnvValue([
+    "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+    "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
+    "SUPABASE_ANON_KEY",
+    "SUPABASE_PUBLISHABLE_KEY"
+  ]);
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
   const authHeader = request.headers.get("authorization") ?? "";
   const accessToken = authHeader.replace(/^Bearer\s+/i, "").trim();
