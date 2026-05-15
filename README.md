@@ -40,6 +40,10 @@ WHATSAPP_ACCESS_TOKEN=
 WHATSAPP_PHONE_NUMBER_ID=
 WHATSAPP_APP_SECRET=
 WHATSAPP_GRAPH_VERSION=v25.0
+EVOLUTION_API_URL=
+EVOLUTION_API_KEY=
+EVOLUTION_INSTANCE_NAME=
+EVOLUTION_WEBHOOK_SECRET=
 DASHMARKET_WHATSAPP_ALLOWED_PHONES=5511999999999
 DASHMARKET_WHATSAPP_ORGANIZATION_ID=
 ```
@@ -80,7 +84,7 @@ Fluxo planejado:
 Rota do assistente:
 
 - `GET /api/whatsapp/webhook` para verificacao do webhook da Meta.
-- `POST /api/whatsapp/webhook` para receber perguntas e responder pelo WhatsApp.
+- `POST /api/whatsapp/webhook` para receber perguntas e responder pelo WhatsApp via Meta Cloud API ou Evolution API.
 
 Callback URL na Meta/Vercel:
 
@@ -96,6 +100,32 @@ O assistente responde perguntas simples como:
 - `como esta o ADS deste mes?`
 
 Para autorizar seu telefone, execute a migration `20260515010000_whatsapp_assistant.sql` e cadastre o numero em `whatsapp_contacts` com DDI/DDD apenas em numeros, por exemplo `5511999999999`. Em projetos de uma empresa só, tambem e possivel usar `DASHMARKET_WHATSAPP_ALLOWED_PHONES` e `DASHMARKET_WHATSAPP_ORGANIZATION_ID`.
+
+### Usando Evolution API
+
+Configure estas variaveis na Vercel:
+
+```bash
+EVOLUTION_API_URL=https://sua-evolution-api.com
+EVOLUTION_API_KEY=sua_apikey
+EVOLUTION_INSTANCE_NAME=nome_da_instancia
+DASHMARKET_WHATSAPP_ALLOWED_PHONES=55DDDNUMERO
+DASHMARKET_WHATSAPP_ORGANIZATION_ID=id_da_empresa_no_supabase
+```
+
+Na Evolution, configure o webhook da instancia para:
+
+```bash
+https://dashmarketml.vercel.app/api/whatsapp/webhook
+```
+
+Evento necessario:
+
+```bash
+MESSAGES_UPSERT
+```
+
+Para adicionar uma protecao extra, defina `EVOLUTION_WEBHOOK_SECRET` na Vercel e envie o mesmo valor no webhook como header `x-dashmarket-webhook-secret` ou como query string `?token=...`.
 
 ## Preparacao para outros marketplaces
 

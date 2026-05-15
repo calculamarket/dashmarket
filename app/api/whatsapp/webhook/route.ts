@@ -25,6 +25,52 @@ type WhatsAppWebhookPayload = {
   }>;
 };
 
+type EvolutionMessageKey = {
+  remoteJid?: string;
+  fromMe?: boolean;
+  id?: string;
+};
+
+type EvolutionMessageContent = {
+  conversation?: string;
+  extendedTextMessage?: {
+    text?: string;
+  };
+  imageMessage?: {
+    caption?: string;
+  };
+  videoMessage?: {
+    caption?: string;
+  };
+  documentMessage?: {
+    caption?: string;
+  };
+};
+
+type EvolutionWebhookPayload = {
+  event?: string;
+  instance?: string;
+  data?: {
+    key?: EvolutionMessageKey;
+    message?: EvolutionMessageContent;
+    messageType?: string;
+    pushName?: string;
+  };
+  server_url?: string;
+};
+
+type InboundWhatsAppMessage = {
+  from: string;
+  id: string;
+  provider: "meta" | "evolution";
+  question: string;
+  rawPayload: unknown;
+  evolution?: {
+    instance?: string;
+    serverUrl?: string;
+  };
+};
+
 type WhatsAppContactRow = {
   organization_id: string;
   user_id: string | null;
@@ -122,6 +168,9 @@ function getEnv() {
   const verifyToken = process.env.WHATSAPP_VERIFY_TOKEN;
   const accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
   const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+  const evolutionApiKey = process.env.EVOLUTION_API_KEY;
+  const evolutionApiUrl = process.env.EVOLUTION_API_URL;
+  const evolutionInstanceName = process.env.EVOLUTION_INSTANCE_NAME;
 
   if (!supabaseUrl || !serviceRoleKey) {
     throw new Error("Supabase nao configurado no ambiente.");
@@ -134,6 +183,10 @@ function getEnv() {
       .map(normalizePhone)
       .filter(Boolean),
     appSecret: process.env.WHATSAPP_APP_SECRET,
+    evolutionApiKey,
+    evolutionApiUrl,
+    evolutionInstanceName,
+    evolutionWebhookSecret: process.env.EVOLUTION_WEBHOOK_SECRET,
     fallbackOrganizationId: process.env.DASHMARKET_WHATSAPP_ORGANIZATION_ID,
     graphVersion: process.env.WHATSAPP_GRAPH_VERSION ?? DEFAULT_GRAPH_VERSION,
     phoneNumberId,
@@ -696,10 +749,15 @@ function buildMetricsResponse(question: string, metrics: BusinessMetrics) {
 }
 
 async function sendWhatsAppMessage(
-  to: string,
+  message: InboundWhatsAppMessage,
   body: string,
   env: ReturnType<typeof getEnv>
 ) {
+  if (message.provider === "evolution") {
+    await sendEvolutionMessage(message, body, env);
+    return;
+  }
+
   if (!env.accessToken || !env.phoneNumberId) {
     throw new Error("WhatsApp nao configurado para envio.");
   }
@@ -714,7 +772,7 @@ async function sendWhatsAppMessage(
       },
       body: JSON.stringify({
         messaging_product: "whatsapp",
-        to,
+        to: message.from,
         type: "text",
         text: {
           body,
@@ -727,6 +785,44 @@ async function sendWhatsAppMessage(
   if (!response.ok) {
     const errorText = await response.text();
     throw new Error(`WhatsApp recusou envio: ${response.status} ${errorText}`);
+  }
+}
+
+async function sendEvolutionMessage(
+  message: InboundWhatsAppMessage,
+  body: string,
+  env: ReturnType<typeof getEnv>
+) {
+  const baseUrl =
+    env.evolutionApiUrl?.replace(/\/+$/, "") ??
+    message.evolution?.serverUrl?.replace(/\/+$/, "");
+  const instanceName = message.evolution?.instance ?? env.evolutionInstanceName;
+
+  if (!baseUrl || !env.evolutionApiKey || !instanceName) {
+    throw new Error("Evolution API nao configurada para envio.");
+  }
+
+  const response = await fetch(
+    `${baseUrl}/message/sendText/${encodeURIComponent(instanceName)}`,
+    {
+      method: "POST",
+      headers: {
+        apikey: env.evolutionApiKey,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        linkPreview: false,
+        number: message.from,
+        text: body
+      })
+    }
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `Evolution API recusou envio: ${response.status} ${errorText}`
+    );
   }
 }
 
@@ -747,12 +843,129 @@ function verifySignature(rawBody: string, signature: string | null, appSecret?: 
   );
 }
 
-function extractMessages(payload: WhatsAppWebhookPayload) {
+function verifyEvolutionWebhook(request: Request, env: ReturnType<typeof getEnv>) {
+  if (!env.evolutionWebhookSecret) return true;
+
+  const url = new URL(request.url);
+  const headerToken =
+    request.headers.get("x-dashmarket-webhook-secret") ??
+    request.headers.get("x-evolution-webhook-token") ??
+    request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
+  const queryToken = url.searchParams.get("token");
+
   return (
+    headerToken === env.evolutionWebhookSecret ||
+    queryToken === env.evolutionWebhookSecret
+  );
+}
+
+function extractMetaMessages(
+  payload: WhatsAppWebhookPayload
+): InboundWhatsAppMessage[] {
+  const messages =
     payload.entry?.flatMap((entry) =>
       entry.changes?.flatMap((change) => change.value?.messages ?? []) ?? []
-    ) ?? []
-  );
+    ) ?? [];
+
+  return messages
+    .map((message) => ({
+      from: normalizePhone(message.from),
+      id: message.id,
+      provider: "meta" as const,
+      question: message.text?.body?.trim() ?? "",
+      rawPayload: message
+    }))
+    .filter((message) => Boolean(message.from && message.id));
+}
+
+function extractEvolutionText(message?: EvolutionMessageContent) {
+  return (
+    message?.conversation ??
+    message?.extendedTextMessage?.text ??
+    message?.imageMessage?.caption ??
+    message?.videoMessage?.caption ??
+    message?.documentMessage?.caption ??
+    ""
+  ).trim();
+}
+
+function isEvolutionMessageEvent(payload: EvolutionWebhookPayload) {
+  const event = payload.event?.toLowerCase().replace(/_/g, ".");
+  return event === "messages.upsert" || Boolean(payload.data?.key?.remoteJid);
+}
+
+function extractEvolutionMessages(
+  payload: EvolutionWebhookPayload
+): InboundWhatsAppMessage[] {
+  if (!isEvolutionMessageEvent(payload)) return [];
+  if (payload.data?.key?.fromMe) return [];
+
+  const remoteJid = payload.data?.key?.remoteJid ?? "";
+  const isGroup = remoteJid.endsWith("@g.us");
+  const from = normalizePhone(remoteJid);
+  const id = payload.data?.key?.id ?? "";
+
+  if (!from || !id || isGroup) return [];
+
+  return [
+    {
+      evolution: {
+        instance: payload.instance,
+        serverUrl: payload.server_url
+      },
+      from,
+      id,
+      provider: "evolution",
+      question: extractEvolutionText(payload.data?.message),
+      rawPayload: payload
+    }
+  ];
+}
+
+function extractInboundMessages(
+  payload: WhatsAppWebhookPayload | EvolutionWebhookPayload
+) {
+  return [
+    ...extractEvolutionMessages(payload as EvolutionWebhookPayload),
+    ...extractMetaMessages(payload as WhatsAppWebhookPayload)
+  ];
+}
+
+function hasEvolutionPayload(payload: WhatsAppWebhookPayload | EvolutionWebhookPayload) {
+  return extractEvolutionMessages(payload as EvolutionWebhookPayload).length > 0;
+}
+
+function hasMetaPayload(payload: WhatsAppWebhookPayload | EvolutionWebhookPayload) {
+  return extractMetaMessages(payload as WhatsAppWebhookPayload).length > 0;
+}
+
+function parseWebhookPayload(rawBody: string) {
+  try {
+    return JSON.parse(rawBody) as WhatsAppWebhookPayload | EvolutionWebhookPayload;
+  } catch {
+    return null;
+  }
+}
+
+function webhookSignatureIsValid(
+  request: Request,
+  rawBody: string,
+  payload: WhatsAppWebhookPayload | EvolutionWebhookPayload,
+  env: ReturnType<typeof getEnv>
+) {
+  if (hasEvolutionPayload(payload)) {
+    return verifyEvolutionWebhook(request, env);
+  }
+
+  if (hasMetaPayload(payload)) {
+    return verifySignature(
+      rawBody,
+      request.headers.get("x-hub-signature-256"),
+      env.appSecret
+    );
+  }
+
+  return true;
 }
 
 export async function GET(request: Request) {
@@ -775,69 +988,65 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const env = getEnv();
   const rawBody = await request.text();
+  const payload = parseWebhookPayload(rawBody);
 
-  if (
-    !verifySignature(
-      rawBody,
-      request.headers.get("x-hub-signature-256"),
-      env.appSecret
-    )
-  ) {
+  if (!payload) {
+    return NextResponse.json({ error: "Payload invalido." }, { status: 400 });
+  }
+
+  if (!webhookSignatureIsValid(request, rawBody, payload, env)) {
     return NextResponse.json({ error: "Assinatura invalida." }, { status: 403 });
   }
 
   const supabase = createClient(env.supabaseUrl, env.serviceRoleKey, {
     auth: { persistSession: false }
   });
-  const payload = JSON.parse(rawBody) as WhatsAppWebhookPayload;
-  const messages = extractMessages(payload);
+  const messages = extractInboundMessages(payload);
 
   for (const message of messages) {
-    const from = normalizePhone(message.from);
-    const question = message.text?.body?.trim() ?? "";
-
-    if (!from || !message.id) continue;
+    if (!message.from || !message.id) continue;
 
     try {
-      const contact = await resolveAuthorizedContact(supabase, from, env);
+      const contact = await resolveAuthorizedContact(supabase, message.from, env);
 
       const shouldProcess = await logMessage(supabase, {
-        body: question,
+        body: message.question,
         direction: "inbound",
         messageId: message.id,
         organizationId: contact?.organizationId,
-        phoneNumber: from,
-        rawPayload: message
+        phoneNumber: message.from,
+        rawPayload: message.rawPayload
       });
 
       if (!shouldProcess) continue;
 
       if (!contact) {
         await sendWhatsAppMessage(
-          from,
+          message,
           "Este numero ainda nao esta autorizado no DASHMARKET. Cadastre seu telefone em whatsapp_contacts ou configure DASHMARKET_WHATSAPP_ALLOWED_PHONES.",
           env
         );
         continue;
       }
 
-      const responseBody = question
-        ? buildMetricsResponse(
-            question,
-            await getBusinessMetrics(
-              supabase,
-              contact.organizationId,
-              parsePeriod(question)
-            )
-          )
-        : buildHelpMessage();
+      const responseBody =
+        !message.question || parseIntent(message.question) === "help"
+          ? buildHelpMessage()
+          : buildMetricsResponse(
+              message.question,
+              await getBusinessMetrics(
+                supabase,
+                contact.organizationId,
+                parsePeriod(message.question)
+              )
+            );
 
-      await sendWhatsAppMessage(from, responseBody, env);
+      await sendWhatsAppMessage(message, responseBody, env);
       await logMessage(supabase, {
         body: responseBody,
         direction: "outbound",
         organizationId: contact.organizationId,
-        phoneNumber: from,
+        phoneNumber: message.from,
         responseBody
       });
     } catch (error) {
@@ -845,7 +1054,7 @@ export async function POST(request: Request) {
 
       try {
         await sendWhatsAppMessage(
-          from,
+          message,
           "Nao consegui consultar o DASHMARKET agora. Confira as variaveis do WhatsApp/Supabase e tente novamente.",
           env
         );
