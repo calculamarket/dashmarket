@@ -42,8 +42,15 @@ type ViewKey =
   | "vendas"
   | "custos"
   | "estoque"
-  | "ads";
+  | "ads"
+  | "financeiro_empresa"
+  | "financeiro_pessoal";
 type SupabaseStatus = "checking" | "demo" | "connected" | "error";
+type FinanceEntryType = "income" | "expense";
+type FinanceEntryStatus = "pending" | "paid" | "overdue";
+type PersonalFinanceTab = "movements" | "loans";
+type LoanDirection = "lent" | "borrowed";
+type LoanStatus = "active" | "settled" | "late";
 
 type Organization = {
   id: string;
@@ -422,6 +429,60 @@ type PromotionDisplayRow = {
   status?: string | null;
 };
 
+type FinanceEntry = {
+  id: string;
+  title: string;
+  category: string;
+  type: FinanceEntryType;
+  amount: number;
+  dueDate: string;
+  paidAt?: string | null;
+  status: FinanceEntryStatus;
+  paymentMethod: string;
+  notes?: string | null;
+};
+
+type FinanceEntryDbRow = {
+  id: string;
+  description: string;
+  category: string;
+  entry_type: FinanceEntryType;
+  amount: number | string;
+  due_date: string;
+  paid_at: string | null;
+  status: FinanceEntryStatus;
+  payment_method: string | null;
+  notes: string | null;
+};
+
+type LoanEntry = {
+  id: string;
+  direction: LoanDirection;
+  personName: string;
+  description: string;
+  principalAmount: number;
+  paidAmount: number;
+  interestRate: number;
+  startDate: string;
+  dueDate: string;
+  status: LoanStatus;
+  notes?: string | null;
+};
+
+type LoanEntryDbRow = {
+  id: string;
+  loan_direction: LoanDirection;
+  person_name: string;
+  description: string;
+  principal_amount: number | string;
+  paid_amount: number | string;
+  interest_rate: number | string;
+  start_date: string;
+  due_date: string;
+  status: LoanStatus;
+  notes: string | null;
+};
+
 const salesSeed: SaleRecord[] = [
   {
     sku: "MLB-CABO-USB-C-1M",
@@ -600,6 +661,113 @@ const promotionRows: PromotionDisplayRow[] = [
   }
 ];
 
+const companyFinanceSeed: FinanceEntry[] = [
+  {
+    id: "company-finance-1",
+    title: "Repasse Mercado Livre",
+    category: "Vendas marketplace",
+    type: "income",
+    amount: 18450,
+    dueDate: "2026-05-17",
+    paidAt: null,
+    status: "pending",
+    paymentMethod: "Conta empresa",
+    notes: "Previsao de repasse semanal"
+  },
+  {
+    id: "company-finance-2",
+    title: "Fornecedor de produtos",
+    category: "Compras",
+    type: "expense",
+    amount: 7200,
+    dueDate: "2026-05-20",
+    paidAt: null,
+    status: "pending",
+    paymentMethod: "PIX",
+    notes: "Reposicao de estoque"
+  },
+  {
+    id: "company-finance-3",
+    title: "Publicidade Mercado Livre",
+    category: "Marketing",
+    type: "expense",
+    amount: 1380,
+    dueDate: "2026-05-12",
+    paidAt: "2026-05-12",
+    status: "paid",
+    paymentMethod: "Cartao empresa",
+    notes: "Campanhas Product Ads"
+  }
+];
+
+const personalFinanceSeed: FinanceEntry[] = [
+  {
+    id: "personal-finance-1",
+    title: "Pro-labore",
+    category: "Renda",
+    type: "income",
+    amount: 6500,
+    dueDate: "2026-05-05",
+    paidAt: "2026-05-05",
+    status: "paid",
+    paymentMethod: "Banco",
+    notes: "Retirada mensal"
+  },
+  {
+    id: "personal-finance-2",
+    title: "Cartao de credito",
+    category: "Cartao",
+    type: "expense",
+    amount: 2180,
+    dueDate: "2026-05-18",
+    paidAt: null,
+    status: "pending",
+    paymentMethod: "Banco",
+    notes: "Fatura aberta"
+  },
+  {
+    id: "personal-finance-3",
+    title: "Internet residencial",
+    category: "Casa",
+    type: "expense",
+    amount: 129.9,
+    dueDate: "2026-05-10",
+    paidAt: "2026-05-10",
+    status: "paid",
+    paymentMethod: "Debito automatico",
+    notes: ""
+  }
+];
+
+const personalLoanSeed: LoanEntry[] = [
+  {
+    id: "personal-loan-1",
+    direction: "lent",
+    personName: "Cliente parceiro",
+    description: "Adiantamento combinado",
+    principalAmount: 2500,
+    paidAmount: 900,
+    interestRate: 0,
+    startDate: "2026-04-15",
+    dueDate: "2026-06-15",
+    status: "active",
+    notes: "Receber em duas parcelas"
+  },
+  {
+    id: "personal-loan-2",
+    direction: "borrowed",
+    personName: "Banco",
+    description: "Capital de giro pessoal",
+    principalAmount: 8000,
+    paidAmount: 2200,
+    interestRate: 2.1,
+    startDate: "2026-03-01",
+    dueDate: "2026-08-01",
+    status: "active",
+    notes: "Acompanhar saldo devedor"
+  }
+];
+
 const costCategoryLabel: Record<SkuCost["category"], string> = {
   product: "Produto",
   packaging: "Embalagem",
@@ -615,10 +783,34 @@ const allocationLabel: Record<SkuCost["allocation"], string> = {
   per_order: "Por pedido"
 };
 
+const financeTypeLabel: Record<FinanceEntryType, string> = {
+  income: "Receita",
+  expense: "Despesa"
+};
+
+const financeStatusLabel: Record<FinanceEntryStatus, string> = {
+  pending: "Pendente",
+  paid: "Pago",
+  overdue: "Vencido"
+};
+
+const loanDirectionLabel: Record<LoanDirection, string> = {
+  lent: "Emprestei",
+  borrowed: "Peguei"
+};
+
+const loanStatusLabel: Record<LoanStatus, string> = {
+  active: "Em aberto",
+  settled: "Quitado",
+  late: "Atrasado"
+};
+
 const views: Array<{ key: ViewKey; label: string; icon: typeof BarChart3 }> = [
   { key: "margem", label: "Margem", icon: BarChart3 },
   { key: "produtos", label: "Produtos", icon: PackageCheck },
   { key: "vendas", label: "Vendas", icon: ClipboardList },
+  { key: "financeiro_empresa", label: "Financeiro Empresa", icon: CircleDollarSign },
+  { key: "financeiro_pessoal", label: "Financeiro Pessoal", icon: WalletCards },
   { key: "custos", label: "Centro de custos", icon: WalletCards },
   { key: "estoque", label: "Estoque Full", icon: Boxes },
   { key: "ads", label: "Publicidade", icon: Megaphone }
@@ -771,6 +963,98 @@ function numberFromInput(value: string) {
 
 function inputNumber(value: number) {
   return value > 0 ? value.toFixed(2) : "";
+}
+
+function addDays(days: number) {
+  const value = new Date();
+  value.setDate(value.getDate() + days);
+  return dateOnly(value);
+}
+
+function makeLocalId(prefix: string) {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+
+  return `${prefix}-${Date.now()}`;
+}
+
+function isMissingRelationError(error: unknown) {
+  if (!error || typeof error !== "object") return false;
+
+  const maybeError = error as { code?: string; message?: string };
+  const message = maybeError.message?.toLowerCase() ?? "";
+
+  return maybeError.code === "42P01" || message.includes("does not exist");
+}
+
+function resolveFinanceStatus(
+  status: FinanceEntryStatus,
+  dueDate: string,
+  paidAt?: string | null
+): FinanceEntryStatus {
+  if (status === "paid" || paidAt) return "paid";
+  if (dueDate && dueDate < dateOnly(new Date())) return "overdue";
+  return "pending";
+}
+
+function mapFinanceEntryRow(row: FinanceEntryDbRow): FinanceEntry {
+  return {
+    id: row.id,
+    title: row.description,
+    category: row.category,
+    type: row.entry_type,
+    amount: numberFromDb(row.amount),
+    dueDate: row.due_date,
+    paidAt: row.paid_at,
+    status: resolveFinanceStatus(row.status, row.due_date, row.paid_at),
+    paymentMethod: row.payment_method ?? "",
+    notes: row.notes
+  };
+}
+
+function mapLoanEntryRow(row: LoanEntryDbRow): LoanEntry {
+  return {
+    id: row.id,
+    direction: row.loan_direction,
+    personName: row.person_name,
+    description: row.description,
+    principalAmount: numberFromDb(row.principal_amount),
+    paidAmount: numberFromDb(row.paid_amount),
+    interestRate: numberFromDb(row.interest_rate),
+    startDate: row.start_date,
+    dueDate: row.due_date,
+    status: resolveLoanStatus(
+      row.status,
+      row.due_date,
+      numberFromDb(row.principal_amount),
+      numberFromDb(row.paid_amount)
+    ),
+    notes: row.notes
+  };
+}
+
+function resolveLoanStatus(
+  status: LoanStatus,
+  dueDate: string,
+  principalAmount: number,
+  paidAmount: number
+): LoanStatus {
+  if (status === "settled" || paidAmount >= principalAmount) return "settled";
+  if (dueDate && dueDate < dateOnly(new Date())) return "late";
+  return "active";
+}
+
+function financeStatusClass(status: FinanceEntryStatus) {
+  if (status === "paid") return "bg-emerald-50 text-sea ring-emerald-100";
+  if (status === "overdue") return "bg-rose-50 text-berry ring-rose-200";
+  return "bg-amber-50 text-clay ring-amber-100";
+}
+
+function loanStatusClass(status: LoanStatus) {
+  if (status === "settled") return "bg-emerald-50 text-sea ring-emerald-100";
+  if (status === "late") return "bg-rose-50 text-berry ring-rose-200";
+  return "bg-amber-50 text-clay ring-amber-100";
 }
 
 function channelLabel(channel: string) {
@@ -1041,6 +1325,7 @@ export function DashmarketDashboard() {
   const [skuFilter, setSkuFilter] = useState("");
   const [costs, setCosts] = useState<SkuCost[]>(costsSeed);
   const [organization, setOrganization] = useState<Organization | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [supabaseStatus, setSupabaseStatus] =
     useState<SupabaseStatus>("checking");
@@ -1053,6 +1338,12 @@ export function DashmarketDashboard() {
   const [realAdvertising, setRealAdvertising] =
     useState<AdvertisingSpend[]>([]);
   const [realPromotions, setRealPromotions] = useState<PromotionDisplayRow[]>([]);
+  const [companyFinanceEntries, setCompanyFinanceEntries] =
+    useState<FinanceEntry[]>(companyFinanceSeed);
+  const [personalFinanceEntries, setPersonalFinanceEntries] =
+    useState<FinanceEntry[]>(personalFinanceSeed);
+  const [personalLoans, setPersonalLoans] =
+    useState<LoanEntry[]>(personalLoanSeed);
   const [marketplaceAccounts, setMarketplaceAccounts] = useState<
     MarketplaceAccountRow[]
   >([]);
@@ -1129,6 +1420,50 @@ export function DashmarketDashboard() {
     null
   );
   const [isAuditingOrders, setIsAuditingOrders] = useState(false);
+  const [personalFinanceTab, setPersonalFinanceTab] =
+    useState<PersonalFinanceTab>("movements");
+  const [isSavingCompanyFinance, setIsSavingCompanyFinance] = useState(false);
+  const [isSavingPersonalFinance, setIsSavingPersonalFinance] = useState(false);
+  const [isSavingLoan, setIsSavingLoan] = useState(false);
+  const [editingCompanyFinanceId, setEditingCompanyFinanceId] =
+    useState<string | null>(null);
+  const [editingPersonalFinanceId, setEditingPersonalFinanceId] =
+    useState<string | null>(null);
+  const [editingLoanId, setEditingLoanId] = useState<string | null>(null);
+  const [companyFinanceForm, setCompanyFinanceForm] = useState({
+    title: "",
+    category: "Operacional",
+    type: "expense" as FinanceEntryType,
+    amount: "",
+    dueDate: dateOnly(new Date()),
+    paidAt: "",
+    status: "pending" as FinanceEntryStatus,
+    paymentMethod: "PIX",
+    notes: ""
+  });
+  const [personalFinanceForm, setPersonalFinanceForm] = useState({
+    title: "",
+    category: "Casa",
+    type: "expense" as FinanceEntryType,
+    amount: "",
+    dueDate: dateOnly(new Date()),
+    paidAt: "",
+    status: "pending" as FinanceEntryStatus,
+    paymentMethod: "Banco",
+    notes: ""
+  });
+  const [personalLoanForm, setPersonalLoanForm] = useState({
+    direction: "lent" as LoanDirection,
+    personName: "",
+    description: "",
+    principalAmount: "",
+    paidAmount: "",
+    interestRate: "",
+    startDate: dateOnly(new Date()),
+    dueDate: addDays(30),
+    status: "active" as LoanStatus,
+    notes: ""
+  });
 
   const activeSales = realSales.length > 0 ? realSales : salesSeed;
   const activeAdvertising =
@@ -1581,6 +1916,143 @@ export function DashmarketDashboard() {
     [calculatorForm, calculatorMode]
   );
 
+  const companyFinanceTotals = useMemo(
+    () =>
+      companyFinanceEntries.reduce(
+        (totals, entry) => {
+          const status = resolveFinanceStatus(
+            entry.status,
+            entry.dueDate,
+            entry.paidAt
+          );
+          const signedAmount = entry.type === "income" ? entry.amount : -entry.amount;
+
+          return {
+            income:
+              totals.income + (entry.type === "income" ? entry.amount : 0),
+            expenses:
+              totals.expenses + (entry.type === "expense" ? entry.amount : 0),
+            paidIncome:
+              totals.paidIncome +
+              (entry.type === "income" && status === "paid" ? entry.amount : 0),
+            paidExpenses:
+              totals.paidExpenses +
+              (entry.type === "expense" && status === "paid" ? entry.amount : 0),
+            openReceivables:
+              totals.openReceivables +
+              (entry.type === "income" && status !== "paid" ? entry.amount : 0),
+            openPayables:
+              totals.openPayables +
+              (entry.type === "expense" && status !== "paid" ? entry.amount : 0),
+            overdue:
+              totals.overdue + (status === "overdue" ? Math.abs(entry.amount) : 0),
+            projectedBalance: totals.projectedBalance + signedAmount
+          };
+        },
+        {
+          income: 0,
+          expenses: 0,
+          paidIncome: 0,
+          paidExpenses: 0,
+          openReceivables: 0,
+          openPayables: 0,
+          overdue: 0,
+          projectedBalance: 0
+        }
+      ),
+    [companyFinanceEntries]
+  );
+
+  const companyFinanceByCategory = useMemo(() => {
+    const categories = new Map<string, { income: number; expenses: number }>();
+
+    for (const entry of companyFinanceEntries) {
+      const current = categories.get(entry.category) ?? { income: 0, expenses: 0 };
+
+      if (entry.type === "income") {
+        current.income += entry.amount;
+      } else {
+        current.expenses += entry.amount;
+      }
+
+      categories.set(entry.category, current);
+    }
+
+    return Array.from(categories.entries())
+      .map(([category, values]) => ({ category, ...values }))
+      .sort((a, b) => b.income + b.expenses - (a.income + a.expenses));
+  }, [companyFinanceEntries]);
+
+  const personalFinanceTotals = useMemo(
+    () =>
+      personalFinanceEntries.reduce(
+        (totals, entry) => {
+          const status = resolveFinanceStatus(
+            entry.status,
+            entry.dueDate,
+            entry.paidAt
+          );
+          const signedAmount = entry.type === "income" ? entry.amount : -entry.amount;
+
+          return {
+            income:
+              totals.income + (entry.type === "income" ? entry.amount : 0),
+            expenses:
+              totals.expenses + (entry.type === "expense" ? entry.amount : 0),
+            paidBalance:
+              totals.paidBalance + (status === "paid" ? signedAmount : 0),
+            openAmount:
+              totals.openAmount + (status !== "paid" ? Math.abs(entry.amount) : 0),
+            overdue:
+              totals.overdue + (status === "overdue" ? Math.abs(entry.amount) : 0),
+            projectedBalance: totals.projectedBalance + signedAmount
+          };
+        },
+        {
+          income: 0,
+          expenses: 0,
+          paidBalance: 0,
+          openAmount: 0,
+          overdue: 0,
+          projectedBalance: 0
+        }
+      ),
+    [personalFinanceEntries]
+  );
+
+  const personalLoanTotals = useMemo(
+    () =>
+      personalLoans.reduce(
+        (totals, loan) => {
+          const openAmount = Math.max(loan.principalAmount - loan.paidAmount, 0);
+
+          return {
+            lent:
+              totals.lent + (loan.direction === "lent" ? loan.principalAmount : 0),
+            borrowed:
+              totals.borrowed +
+              (loan.direction === "borrowed" ? loan.principalAmount : 0),
+            receivable:
+              totals.receivable + (loan.direction === "lent" ? openAmount : 0),
+            payable:
+              totals.payable + (loan.direction === "borrowed" ? openAmount : 0),
+            late:
+              totals.late +
+              (resolveLoanStatus(
+                loan.status,
+                loan.dueDate,
+                loan.principalAmount,
+                loan.paidAmount
+              ) === "late"
+                ? openAmount
+                : 0)
+          };
+        },
+        { lent: 0, borrowed: 0, receivable: 0, payable: 0, late: 0 }
+      ),
+    [personalLoans]
+  );
+
   const loadCostCenter = useCallback(async (organizationId: string) => {
     if (!supabaseClient) return;
 
@@ -1805,6 +2277,82 @@ export function DashmarketDashboard() {
     );
   }, [supabaseClient]);
 
+  const loadCompanyFinance = useCallback(async (organizationId: string) => {
+    if (!supabaseClient) return;
+
+    const { data, error } = await supabaseClient
+      .from("company_financial_entries")
+      .select(
+        "id, description, category, entry_type, amount, due_date, paid_at, status, payment_method, notes"
+      )
+      .eq("organization_id", organizationId)
+      .order("due_date", { ascending: true })
+      .limit(1000);
+
+    if (error) {
+      if (isMissingRelationError(error)) {
+        setCompanyFinanceEntries(companyFinanceSeed);
+        return;
+      }
+
+      throw error;
+    }
+
+    setCompanyFinanceEntries(
+      ((data ?? []) as FinanceEntryDbRow[]).map(mapFinanceEntryRow)
+    );
+  }, [supabaseClient]);
+
+  const loadPersonalFinance = useCallback(async (currentUserId: string) => {
+    if (!supabaseClient) return;
+
+    const { data, error } = await supabaseClient
+      .from("personal_financial_entries")
+      .select(
+        "id, description, category, entry_type, amount, due_date, paid_at, status, payment_method, notes"
+      )
+      .eq("user_id", currentUserId)
+      .order("due_date", { ascending: true })
+      .limit(1000);
+
+    if (error) {
+      if (isMissingRelationError(error)) {
+        setPersonalFinanceEntries(personalFinanceSeed);
+        return;
+      }
+
+      throw error;
+    }
+
+    setPersonalFinanceEntries(
+      ((data ?? []) as FinanceEntryDbRow[]).map(mapFinanceEntryRow)
+    );
+  }, [supabaseClient]);
+
+  const loadPersonalLoans = useCallback(async (currentUserId: string) => {
+    if (!supabaseClient) return;
+
+    const { data, error } = await supabaseClient
+      .from("personal_loans")
+      .select(
+        "id, loan_direction, person_name, description, principal_amount, paid_amount, interest_rate, start_date, due_date, status, notes"
+      )
+      .eq("user_id", currentUserId)
+      .order("due_date", { ascending: true })
+      .limit(1000);
+
+    if (error) {
+      if (isMissingRelationError(error)) {
+        setPersonalLoans(personalLoanSeed);
+        return;
+      }
+
+      throw error;
+    }
+
+    setPersonalLoans(((data ?? []) as LoanEntryDbRow[]).map(mapLoanEntryRow));
+  }, [supabaseClient]);
+
   const loadMarketplaceAccounts = useCallback(async (organizationId: string) => {
     if (!supabaseClient) return;
 
@@ -1827,11 +2375,15 @@ export function DashmarketDashboard() {
     async function loadWorkspace() {
       if (!supabaseClient) {
         setSupabaseStatus("demo");
+        setUserId(null);
         setRealSales([]);
         setRealSaleDetails([]);
         setRealInventory([]);
         setRealAdvertising([]);
         setRealPromotions([]);
+        setCompanyFinanceEntries(companyFinanceSeed);
+        setPersonalFinanceEntries(personalFinanceSeed);
+        setPersonalLoans(personalLoanSeed);
         setCosts(costsSeed);
         setHiddenSkus([]);
         return;
@@ -1847,6 +2399,7 @@ export function DashmarketDashboard() {
         if (!session) {
           if (!isMounted) return;
           setSupabaseStatus("demo");
+          setUserId(null);
           setUserEmail(null);
           setOrganization(null);
           setRealProducts([]);
@@ -1855,6 +2408,9 @@ export function DashmarketDashboard() {
           setRealInventory([]);
           setRealAdvertising([]);
           setRealPromotions([]);
+          setCompanyFinanceEntries(companyFinanceSeed);
+          setPersonalFinanceEntries(personalFinanceSeed);
+          setPersonalLoans(personalLoanSeed);
           setCosts(costsSeed);
           setHiddenSkus([]);
           return;
@@ -1874,6 +2430,7 @@ export function DashmarketDashboard() {
 
         if (!isMounted) return;
 
+        setUserId(session.user.id);
         setUserEmail(session.user.email ?? null);
         setOrganization(currentOrganization);
         setSupabaseStatus("connected");
@@ -1884,6 +2441,9 @@ export function DashmarketDashboard() {
           await loadInventory(currentOrganization.id);
           await loadAdvertising(currentOrganization.id);
           await loadPromotions(currentOrganization.id);
+          await loadCompanyFinance(currentOrganization.id);
+          await loadPersonalFinance(session.user.id);
+          await loadPersonalLoans(session.user.id);
           await loadMarketplaceAccounts(currentOrganization.id);
         } else {
           setCosts([]);
@@ -1892,17 +2452,24 @@ export function DashmarketDashboard() {
           setRealInventory([]);
           setRealAdvertising([]);
           setRealPromotions([]);
+          setCompanyFinanceEntries([]);
+          setPersonalFinanceEntries(personalFinanceSeed);
+          setPersonalLoans(personalLoanSeed);
           setMarketplaceAccounts([]);
           setDataMessage("Usuario autenticado, mas sem empresa vinculada.");
         }
       } catch (error) {
         if (!isMounted) return;
         setSupabaseStatus("error");
+        setUserId(null);
         setRealSales([]);
         setRealSaleDetails([]);
         setRealInventory([]);
         setRealAdvertising([]);
         setRealPromotions([]);
+        setCompanyFinanceEntries(companyFinanceSeed);
+        setPersonalFinanceEntries(personalFinanceSeed);
+        setPersonalLoans(personalLoanSeed);
         setCosts(costsSeed);
         setHiddenSkus([]);
         setDataMessage(
@@ -1921,12 +2488,471 @@ export function DashmarketDashboard() {
   }, [
     loadCostCenter,
     loadAdvertising,
+    loadCompanyFinance,
     loadInventory,
     loadMarketplaceAccounts,
+    loadPersonalFinance,
+    loadPersonalLoans,
     loadPromotions,
     loadSales,
     supabaseClient
   ]);
+
+  function resetCompanyFinanceForm() {
+    setCompanyFinanceForm({
+      title: "",
+      category: "Operacional",
+      type: "expense",
+      amount: "",
+      dueDate: dateOnly(new Date()),
+      paidAt: "",
+      status: "pending",
+      paymentMethod: "PIX",
+      notes: ""
+    });
+    setEditingCompanyFinanceId(null);
+  }
+
+  function resetPersonalFinanceForm() {
+    setPersonalFinanceForm({
+      title: "",
+      category: "Casa",
+      type: "expense",
+      amount: "",
+      dueDate: dateOnly(new Date()),
+      paidAt: "",
+      status: "pending",
+      paymentMethod: "Banco",
+      notes: ""
+    });
+    setEditingPersonalFinanceId(null);
+  }
+
+  function resetPersonalLoanForm() {
+    setPersonalLoanForm({
+      direction: "lent",
+      personName: "",
+      description: "",
+      principalAmount: "",
+      paidAmount: "",
+      interestRate: "",
+      startDate: dateOnly(new Date()),
+      dueDate: addDays(30),
+      status: "active",
+      notes: ""
+    });
+    setEditingLoanId(null);
+  }
+
+  function financeEntryFromCompanyForm(): FinanceEntry {
+    const paidAt =
+      companyFinanceForm.status === "paid"
+        ? companyFinanceForm.paidAt || dateOnly(new Date())
+        : "";
+
+    return {
+      id: editingCompanyFinanceId ?? makeLocalId("company-finance"),
+      title: companyFinanceForm.title.trim(),
+      category: companyFinanceForm.category.trim() || "Operacional",
+      type: companyFinanceForm.type,
+      amount: numberFromInput(companyFinanceForm.amount),
+      dueDate: companyFinanceForm.dueDate || dateOnly(new Date()),
+      paidAt: paidAt || null,
+      status: resolveFinanceStatus(
+        companyFinanceForm.status,
+        companyFinanceForm.dueDate,
+        paidAt
+      ),
+      paymentMethod: companyFinanceForm.paymentMethod.trim(),
+      notes: companyFinanceForm.notes.trim()
+    };
+  }
+
+  function financeEntryFromPersonalForm(): FinanceEntry {
+    const paidAt =
+      personalFinanceForm.status === "paid"
+        ? personalFinanceForm.paidAt || dateOnly(new Date())
+        : "";
+
+    return {
+      id: editingPersonalFinanceId ?? makeLocalId("personal-finance"),
+      title: personalFinanceForm.title.trim(),
+      category: personalFinanceForm.category.trim() || "Pessoal",
+      type: personalFinanceForm.type,
+      amount: numberFromInput(personalFinanceForm.amount),
+      dueDate: personalFinanceForm.dueDate || dateOnly(new Date()),
+      paidAt: paidAt || null,
+      status: resolveFinanceStatus(
+        personalFinanceForm.status,
+        personalFinanceForm.dueDate,
+        paidAt
+      ),
+      paymentMethod: personalFinanceForm.paymentMethod.trim(),
+      notes: personalFinanceForm.notes.trim()
+    };
+  }
+
+  function loanFromForm(): LoanEntry {
+    const principalAmount = numberFromInput(personalLoanForm.principalAmount);
+    const paidAmount = numberFromInput(personalLoanForm.paidAmount);
+
+    return {
+      id: editingLoanId ?? makeLocalId("personal-loan"),
+      direction: personalLoanForm.direction,
+      personName: personalLoanForm.personName.trim(),
+      description: personalLoanForm.description.trim(),
+      principalAmount,
+      paidAmount,
+      interestRate: numberFromInput(personalLoanForm.interestRate),
+      startDate: personalLoanForm.startDate || dateOnly(new Date()),
+      dueDate: personalLoanForm.dueDate || addDays(30),
+      status: resolveLoanStatus(
+        personalLoanForm.status,
+        personalLoanForm.dueDate,
+        principalAmount,
+        paidAmount
+      ),
+      notes: personalLoanForm.notes.trim()
+    };
+  }
+
+  function startEditingCompanyFinance(entry: FinanceEntry) {
+    setEditingCompanyFinanceId(entry.id);
+    setCompanyFinanceForm({
+      title: entry.title,
+      category: entry.category,
+      type: entry.type,
+      amount: inputNumber(entry.amount),
+      dueDate: entry.dueDate,
+      paidAt: entry.paidAt ?? "",
+      status: entry.status,
+      paymentMethod: entry.paymentMethod,
+      notes: entry.notes ?? ""
+    });
+    setDataMessage(`Editando lancamento da empresa: ${entry.title}.`);
+  }
+
+  function startEditingPersonalFinance(entry: FinanceEntry) {
+    setEditingPersonalFinanceId(entry.id);
+    setPersonalFinanceForm({
+      title: entry.title,
+      category: entry.category,
+      type: entry.type,
+      amount: inputNumber(entry.amount),
+      dueDate: entry.dueDate,
+      paidAt: entry.paidAt ?? "",
+      status: entry.status,
+      paymentMethod: entry.paymentMethod,
+      notes: entry.notes ?? ""
+    });
+    setDataMessage(`Editando lancamento pessoal: ${entry.title}.`);
+  }
+
+  function startEditingLoan(loan: LoanEntry) {
+    setEditingLoanId(loan.id);
+    setPersonalLoanForm({
+      direction: loan.direction,
+      personName: loan.personName,
+      description: loan.description,
+      principalAmount: inputNumber(loan.principalAmount),
+      paidAmount: inputNumber(loan.paidAmount),
+      interestRate: inputNumber(loan.interestRate),
+      startDate: loan.startDate,
+      dueDate: loan.dueDate,
+      status: loan.status,
+      notes: loan.notes ?? ""
+    });
+    setPersonalFinanceTab("loans");
+    setDataMessage(`Editando emprestimo: ${loan.description}.`);
+  }
+
+  async function saveCompanyFinanceEntry(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const entry = financeEntryFromCompanyForm();
+    if (!entry.title || entry.amount <= 0) return;
+
+    if (supabaseClient && organization) {
+      setIsSavingCompanyFinance(true);
+      setDataMessage(null);
+
+      try {
+        const payload = {
+          organization_id: organization.id,
+          description: entry.title,
+          category: entry.category,
+          entry_type: entry.type,
+          amount: entry.amount,
+          due_date: entry.dueDate,
+          paid_at: entry.paidAt || null,
+          status: entry.status,
+          payment_method: entry.paymentMethod || null,
+          notes: entry.notes || null
+        };
+        const { error } = editingCompanyFinanceId
+          ? await supabaseClient
+              .from("company_financial_entries")
+              .update(payload)
+              .eq("id", editingCompanyFinanceId)
+          : await supabaseClient.from("company_financial_entries").insert(payload);
+
+        if (error) throw error;
+
+        await loadCompanyFinance(organization.id);
+        resetCompanyFinanceForm();
+        setDataMessage(
+          editingCompanyFinanceId
+            ? "Lancamento financeiro da empresa atualizado."
+            : "Lancamento financeiro da empresa salvo."
+        );
+      } catch (error) {
+        setDataMessage(
+          isMissingRelationError(error)
+            ? "Financeiro ainda nao existe no Supabase. Execute a migration de financeiro e tente novamente."
+            : error instanceof Error
+              ? error.message
+              : "Nao foi possivel salvar o financeiro da empresa."
+        );
+      } finally {
+        setIsSavingCompanyFinance(false);
+      }
+
+      return;
+    }
+
+    setCompanyFinanceEntries((current) =>
+      editingCompanyFinanceId
+        ? current.map((item) => (item.id === editingCompanyFinanceId ? entry : item))
+        : [...current, entry]
+    );
+    resetCompanyFinanceForm();
+    setDataMessage("Lancamento da empresa salvo em modo demonstracao.");
+  }
+
+  async function savePersonalFinanceEntry(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const entry = financeEntryFromPersonalForm();
+    if (!entry.title || entry.amount <= 0) return;
+
+    if (supabaseClient && userId) {
+      setIsSavingPersonalFinance(true);
+      setDataMessage(null);
+
+      try {
+        const payload = {
+          user_id: userId,
+          description: entry.title,
+          category: entry.category,
+          entry_type: entry.type,
+          amount: entry.amount,
+          due_date: entry.dueDate,
+          paid_at: entry.paidAt || null,
+          status: entry.status,
+          payment_method: entry.paymentMethod || null,
+          notes: entry.notes || null
+        };
+        const { error } = editingPersonalFinanceId
+          ? await supabaseClient
+              .from("personal_financial_entries")
+              .update(payload)
+              .eq("id", editingPersonalFinanceId)
+          : await supabaseClient.from("personal_financial_entries").insert(payload);
+
+        if (error) throw error;
+
+        await loadPersonalFinance(userId);
+        resetPersonalFinanceForm();
+        setDataMessage(
+          editingPersonalFinanceId
+            ? "Lancamento financeiro pessoal atualizado."
+            : "Lancamento financeiro pessoal salvo."
+        );
+      } catch (error) {
+        setDataMessage(
+          isMissingRelationError(error)
+            ? "Financeiro pessoal ainda nao existe no Supabase. Execute a migration de financeiro e tente novamente."
+            : error instanceof Error
+              ? error.message
+              : "Nao foi possivel salvar o financeiro pessoal."
+        );
+      } finally {
+        setIsSavingPersonalFinance(false);
+      }
+
+      return;
+    }
+
+    setPersonalFinanceEntries((current) =>
+      editingPersonalFinanceId
+        ? current.map((item) => (item.id === editingPersonalFinanceId ? entry : item))
+        : [...current, entry]
+    );
+    resetPersonalFinanceForm();
+    setDataMessage("Lancamento pessoal salvo em modo demonstracao.");
+  }
+
+  async function savePersonalLoan(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const loan = loanFromForm();
+    if (!loan.personName || !loan.description || loan.principalAmount <= 0) return;
+
+    if (supabaseClient && userId) {
+      setIsSavingLoan(true);
+      setDataMessage(null);
+
+      try {
+        const payload = {
+          user_id: userId,
+          loan_direction: loan.direction,
+          person_name: loan.personName,
+          description: loan.description,
+          principal_amount: loan.principalAmount,
+          paid_amount: loan.paidAmount,
+          interest_rate: loan.interestRate,
+          start_date: loan.startDate,
+          due_date: loan.dueDate,
+          status: loan.status,
+          notes: loan.notes || null
+        };
+        const { error } = editingLoanId
+          ? await supabaseClient
+              .from("personal_loans")
+              .update(payload)
+              .eq("id", editingLoanId)
+          : await supabaseClient.from("personal_loans").insert(payload);
+
+        if (error) throw error;
+
+        await loadPersonalLoans(userId);
+        resetPersonalLoanForm();
+        setDataMessage(
+          editingLoanId ? "Emprestimo atualizado." : "Emprestimo salvo."
+        );
+      } catch (error) {
+        setDataMessage(
+          isMissingRelationError(error)
+            ? "A aba de emprestimos ainda nao existe no Supabase. Execute a migration de financeiro e tente novamente."
+            : error instanceof Error
+              ? error.message
+              : "Nao foi possivel salvar o emprestimo."
+        );
+      } finally {
+        setIsSavingLoan(false);
+      }
+
+      return;
+    }
+
+    setPersonalLoans((current) =>
+      editingLoanId
+        ? current.map((item) => (item.id === editingLoanId ? loan : item))
+        : [...current, loan]
+    );
+    resetPersonalLoanForm();
+    setDataMessage("Emprestimo salvo em modo demonstracao.");
+  }
+
+  async function deleteCompanyFinanceEntry(entry: FinanceEntry) {
+    if (!window.confirm(`Excluir o lancamento "${entry.title}"?`)) return;
+
+    if (supabaseClient && organization) {
+      setIsSavingCompanyFinance(true);
+
+      try {
+        const { error } = await supabaseClient
+          .from("company_financial_entries")
+          .delete()
+          .eq("id", entry.id);
+
+        if (error) throw error;
+        await loadCompanyFinance(organization.id);
+        setDataMessage("Lancamento da empresa excluido.");
+      } catch (error) {
+        setDataMessage(
+          error instanceof Error
+            ? error.message
+            : "Nao foi possivel excluir o lancamento da empresa."
+        );
+      } finally {
+        setIsSavingCompanyFinance(false);
+      }
+
+      return;
+    }
+
+    setCompanyFinanceEntries((current) =>
+      current.filter((item) => item.id !== entry.id)
+    );
+    setDataMessage("Lancamento da empresa removido em modo demonstracao.");
+  }
+
+  async function deletePersonalFinanceEntry(entry: FinanceEntry) {
+    if (!window.confirm(`Excluir o lancamento "${entry.title}"?`)) return;
+
+    if (supabaseClient && userId) {
+      setIsSavingPersonalFinance(true);
+
+      try {
+        const { error } = await supabaseClient
+          .from("personal_financial_entries")
+          .delete()
+          .eq("id", entry.id);
+
+        if (error) throw error;
+        await loadPersonalFinance(userId);
+        setDataMessage("Lancamento pessoal excluido.");
+      } catch (error) {
+        setDataMessage(
+          error instanceof Error
+            ? error.message
+            : "Nao foi possivel excluir o lancamento pessoal."
+        );
+      } finally {
+        setIsSavingPersonalFinance(false);
+      }
+
+      return;
+    }
+
+    setPersonalFinanceEntries((current) =>
+      current.filter((item) => item.id !== entry.id)
+    );
+    setDataMessage("Lancamento pessoal removido em modo demonstracao.");
+  }
+
+  async function deletePersonalLoan(loan: LoanEntry) {
+    if (!window.confirm(`Excluir o emprestimo "${loan.description}"?`)) return;
+
+    if (supabaseClient && userId) {
+      setIsSavingLoan(true);
+
+      try {
+        const { error } = await supabaseClient
+          .from("personal_loans")
+          .delete()
+          .eq("id", loan.id);
+
+        if (error) throw error;
+        await loadPersonalLoans(userId);
+        setDataMessage("Emprestimo excluido.");
+      } catch (error) {
+        setDataMessage(
+          error instanceof Error
+            ? error.message
+            : "Nao foi possivel excluir o emprestimo."
+        );
+      } finally {
+        setIsSavingLoan(false);
+      }
+
+      return;
+    }
+
+    setPersonalLoans((current) => current.filter((item) => item.id !== loan.id));
+    setDataMessage("Emprestimo removido em modo demonstracao.");
+  }
 
   function resetCostFormFields() {
     setCostForm((current) => ({
@@ -4203,6 +5229,1123 @@ export function DashmarketDashboard() {
                   </table>
                 </div>
               </section>
+            </section>
+          )}
+
+          {activeView === "financeiro_empresa" && (
+            <section className="mt-5 grid gap-5">
+              <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <KpiCard
+                  detail={`A receber ${formatCurrency.format(
+                    companyFinanceTotals.openReceivables
+                  )}`}
+                  icon={CircleDollarSign}
+                  title="Receitas"
+                  value={formatCurrency.format(companyFinanceTotals.income)}
+                />
+                <KpiCard
+                  detail={`A pagar ${formatCurrency.format(
+                    companyFinanceTotals.openPayables
+                  )}`}
+                  icon={WalletCards}
+                  title="Despesas"
+                  tone="clay"
+                  value={formatCurrency.format(companyFinanceTotals.expenses)}
+                />
+                <KpiCard
+                  detail={`Realizado ${formatCurrency.format(
+                    companyFinanceTotals.paidIncome -
+                      companyFinanceTotals.paidExpenses
+                  )}`}
+                  icon={LineChart}
+                  title="Saldo previsto"
+                  tone={
+                    companyFinanceTotals.projectedBalance >= 0 ? "moss" : "berry"
+                  }
+                  value={formatCurrency.format(
+                    companyFinanceTotals.projectedBalance
+                  )}
+                />
+                <KpiCard
+                  detail="Contas pendentes fora do prazo"
+                  icon={RefreshCw}
+                  title="Vencidos"
+                  tone={companyFinanceTotals.overdue > 0 ? "berry" : "moss"}
+                  value={formatCurrency.format(companyFinanceTotals.overdue)}
+                />
+              </section>
+
+              <section className="grid gap-5 xl:grid-cols-[380px_1fr]">
+                <form
+                  className="rounded-lg border border-black/10 bg-white p-4 shadow-sm"
+                  onSubmit={saveCompanyFinanceEntry}
+                >
+                  <div className="flex items-center gap-2">
+                    <CircleDollarSign aria-hidden className="h-5 w-5 text-sea" />
+                    <h2 className="text-lg font-bold">
+                      {editingCompanyFinanceId
+                        ? "Editar lancamento"
+                        : "Novo lancamento"}
+                    </h2>
+                  </div>
+
+                  <div className="mt-4 grid gap-3">
+                    <label className="grid gap-1 text-sm font-semibold">
+                      Tipo
+                      <select
+                        className="h-10 rounded-lg border border-black/10 bg-paper px-3 font-normal outline-none focus:ring-4 focus:ring-sea/20"
+                        onChange={(event) =>
+                          setCompanyFinanceForm((current) => ({
+                            ...current,
+                            type: event.target.value as FinanceEntryType
+                          }))
+                        }
+                        value={companyFinanceForm.type}
+                      >
+                        <option value="income">Receita</option>
+                        <option value="expense">Despesa</option>
+                      </select>
+                    </label>
+
+                    <label className="grid gap-1 text-sm font-semibold">
+                      Descricao
+                      <input
+                        className="h-10 rounded-lg border border-black/10 bg-paper px-3 font-normal outline-none focus:ring-4 focus:ring-sea/20"
+                        onChange={(event) =>
+                          setCompanyFinanceForm((current) => ({
+                            ...current,
+                            title: event.target.value
+                          }))
+                        }
+                        placeholder="Fornecedor, repasse, imposto"
+                        value={companyFinanceForm.title}
+                      />
+                    </label>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <label className="grid gap-1 text-sm font-semibold">
+                        Categoria
+                        <input
+                          className="h-10 rounded-lg border border-black/10 bg-paper px-3 font-normal outline-none focus:ring-4 focus:ring-sea/20"
+                          onChange={(event) =>
+                            setCompanyFinanceForm((current) => ({
+                              ...current,
+                              category: event.target.value
+                            }))
+                          }
+                          value={companyFinanceForm.category}
+                        />
+                      </label>
+                      <label className="grid gap-1 text-sm font-semibold">
+                        Valor
+                        <input
+                          className="h-10 rounded-lg border border-black/10 bg-paper px-3 font-normal outline-none focus:ring-4 focus:ring-sea/20"
+                          min="0"
+                          onChange={(event) =>
+                            setCompanyFinanceForm((current) => ({
+                              ...current,
+                              amount: event.target.value
+                            }))
+                          }
+                          placeholder="0,00"
+                          step="0.01"
+                          type="number"
+                          value={companyFinanceForm.amount}
+                        />
+                      </label>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <label className="grid gap-1 text-sm font-semibold">
+                        Vencimento
+                        <input
+                          className="h-10 rounded-lg border border-black/10 bg-paper px-3 font-normal outline-none focus:ring-4 focus:ring-sea/20"
+                          onChange={(event) =>
+                            setCompanyFinanceForm((current) => ({
+                              ...current,
+                              dueDate: event.target.value
+                            }))
+                          }
+                          type="date"
+                          value={companyFinanceForm.dueDate}
+                        />
+                      </label>
+                      <label className="grid gap-1 text-sm font-semibold">
+                        Status
+                        <select
+                          className="h-10 rounded-lg border border-black/10 bg-paper px-3 font-normal outline-none focus:ring-4 focus:ring-sea/20"
+                          onChange={(event) =>
+                            setCompanyFinanceForm((current) => ({
+                              ...current,
+                              status: event.target.value as FinanceEntryStatus,
+                              paidAt:
+                                event.target.value === "paid"
+                                  ? current.paidAt || dateOnly(new Date())
+                                  : ""
+                            }))
+                          }
+                          value={companyFinanceForm.status}
+                        >
+                          <option value="pending">Pendente</option>
+                          <option value="paid">Pago</option>
+                          <option value="overdue">Vencido</option>
+                        </select>
+                      </label>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <label className="grid gap-1 text-sm font-semibold">
+                        Pagamento
+                        <input
+                          className="h-10 rounded-lg border border-black/10 bg-paper px-3 font-normal outline-none focus:ring-4 focus:ring-sea/20"
+                          onChange={(event) =>
+                            setCompanyFinanceForm((current) => ({
+                              ...current,
+                              paidAt: event.target.value,
+                              status: event.target.value ? "paid" : current.status
+                            }))
+                          }
+                          type="date"
+                          value={companyFinanceForm.paidAt}
+                        />
+                      </label>
+                      <label className="grid gap-1 text-sm font-semibold">
+                        Forma
+                        <input
+                          className="h-10 rounded-lg border border-black/10 bg-paper px-3 font-normal outline-none focus:ring-4 focus:ring-sea/20"
+                          onChange={(event) =>
+                            setCompanyFinanceForm((current) => ({
+                              ...current,
+                              paymentMethod: event.target.value
+                            }))
+                          }
+                          value={companyFinanceForm.paymentMethod}
+                        />
+                      </label>
+                    </div>
+
+                    <label className="grid gap-1 text-sm font-semibold">
+                      Observacoes
+                      <textarea
+                        className="min-h-20 rounded-lg border border-black/10 bg-paper px-3 py-2 font-normal outline-none focus:ring-4 focus:ring-sea/20"
+                        onChange={(event) =>
+                          setCompanyFinanceForm((current) => ({
+                            ...current,
+                            notes: event.target.value
+                          }))
+                        }
+                        value={companyFinanceForm.notes}
+                      />
+                    </label>
+
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <button
+                        className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-ink px-4 text-sm font-bold text-white hover:bg-black"
+                        disabled={isSavingCompanyFinance}
+                        type="submit"
+                      >
+                        <Save aria-hidden className="h-4 w-4" />
+                        {isSavingCompanyFinance
+                          ? "Salvando"
+                          : editingCompanyFinanceId
+                            ? "Salvar"
+                            : "Adicionar"}
+                      </button>
+                      {editingCompanyFinanceId && (
+                        <button
+                          className="inline-flex h-11 items-center justify-center rounded-lg bg-paper px-4 text-sm font-bold text-ink ring-1 ring-black/10 hover:bg-black/[0.03]"
+                          onClick={resetCompanyFinanceForm}
+                          type="button"
+                        >
+                          Cancelar
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </form>
+
+                <section className="rounded-lg border border-black/10 bg-white shadow-sm">
+                  <div className="flex flex-col gap-3 border-b border-black/10 p-4 lg:flex-row lg:items-center lg:justify-between">
+                    <div>
+                      <h2 className="text-lg font-bold">
+                        Contas da empresa
+                      </h2>
+                      <p className="text-sm text-black/60">
+                        Controle simples de contas a pagar, a receber e realizado.
+                      </p>
+                    </div>
+                    <span className="inline-flex h-8 items-center gap-2 rounded-lg bg-emerald-50 px-3 text-sm font-semibold text-sea ring-1 ring-emerald-100">
+                      <CircleDollarSign aria-hidden className="h-4 w-4" />
+                      Fluxo de caixa
+                    </span>
+                  </div>
+                  <div className="table-scroll overflow-x-auto">
+                    <table className="min-w-[1060px] w-full text-left text-sm">
+                      <thead className="bg-black/[0.025] text-xs uppercase tracking-normal text-black/50">
+                        <tr>
+                          <th className="px-4 py-3">Status</th>
+                          <th className="px-4 py-3">Vencimento</th>
+                          <th className="px-4 py-3">Tipo</th>
+                          <th className="px-4 py-3">Descricao</th>
+                          <th className="px-4 py-3">Categoria</th>
+                          <th className="px-4 py-3">Valor</th>
+                          <th className="px-4 py-3">Forma</th>
+                          <th className="px-4 py-3">Acoes</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-black/10">
+                        {companyFinanceEntries.map((entry) => {
+                          const status = resolveFinanceStatus(
+                            entry.status,
+                            entry.dueDate,
+                            entry.paidAt
+                          );
+
+                          return (
+                            <tr className="hover:bg-black/[0.018]" key={entry.id}>
+                              <td className="px-4 py-3">
+                                <span
+                                  className={`inline-flex rounded-lg px-2 py-1 text-xs font-bold ring-1 ${financeStatusClass(status)}`}
+                                >
+                                  {financeStatusLabel[status]}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3">
+                                {new Date(`${entry.dueDate}T00:00:00`).toLocaleDateString(
+                                  "pt-BR"
+                                )}
+                              </td>
+                              <td className="px-4 py-3">
+                                {financeTypeLabel[entry.type]}
+                              </td>
+                              <td className="px-4 py-3">
+                                <p className="font-semibold text-ink">
+                                  {entry.title}
+                                </p>
+                                {entry.notes && (
+                                  <p className="text-xs text-black/45">
+                                    {entry.notes}
+                                  </p>
+                                )}
+                              </td>
+                              <td className="px-4 py-3">{entry.category}</td>
+                              <td
+                                className={`px-4 py-3 font-bold ${
+                                  entry.type === "income"
+                                    ? "text-sea"
+                                    : "text-berry"
+                                }`}
+                              >
+                                {formatCurrency.format(entry.amount)}
+                              </td>
+                              <td className="px-4 py-3">
+                                {entry.paymentMethod || "-"}
+                              </td>
+                              <td className="px-4 py-3">
+                                <div className="flex flex-wrap gap-2">
+                                  <button
+                                    className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-paper px-3 text-sm font-bold text-ink ring-1 ring-black/10 hover:bg-black/[0.03]"
+                                    disabled={isSavingCompanyFinance}
+                                    onClick={() => startEditingCompanyFinance(entry)}
+                                    type="button"
+                                  >
+                                    <Pencil aria-hidden className="h-4 w-4" />
+                                    Editar
+                                  </button>
+                                  <button
+                                    className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-berry/10 px-3 text-sm font-bold text-berry ring-1 ring-berry/20 hover:bg-berry/15"
+                                    disabled={isSavingCompanyFinance}
+                                    onClick={() => deleteCompanyFinanceEntry(entry)}
+                                    type="button"
+                                  >
+                                    <Trash2 aria-hidden className="h-4 w-4" />
+                                    Excluir
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                        {companyFinanceEntries.length === 0 && (
+                          <tr>
+                            <td
+                              className="px-4 py-8 text-center text-black/55"
+                              colSpan={8}
+                            >
+                              Nenhum lancamento financeiro cadastrado.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+              </section>
+
+              <section className="rounded-lg border border-black/10 bg-white p-4 shadow-sm">
+                <h2 className="text-lg font-bold">Resumo por categoria</h2>
+                <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  {companyFinanceByCategory.map((category) => (
+                    <div
+                      className="rounded-lg bg-paper p-3 ring-1 ring-black/10"
+                      key={category.category}
+                    >
+                      <p className="font-bold text-ink">{category.category}</p>
+                      <p className="mt-2 text-sm text-sea">
+                        Receitas {formatCurrency.format(category.income)}
+                      </p>
+                      <p className="text-sm text-berry">
+                        Despesas {formatCurrency.format(category.expenses)}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            </section>
+          )}
+
+          {activeView === "financeiro_pessoal" && (
+            <section className="mt-5 grid gap-5">
+              <section className="rounded-lg border border-black/10 bg-white p-3 shadow-sm">
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    ["movements", "Movimentacoes"],
+                    ["loans", "Emprestimos"]
+                  ].map(([tab, label]) => (
+                    <button
+                      className={`h-10 rounded-lg px-3 text-sm font-bold ring-1 ${
+                        personalFinanceTab === tab
+                          ? "bg-ink text-white ring-ink"
+                          : "bg-paper text-ink ring-black/10 hover:bg-black/[0.03]"
+                      }`}
+                      key={tab}
+                      onClick={() => setPersonalFinanceTab(tab as PersonalFinanceTab)}
+                      type="button"
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </section>
+
+              {personalFinanceTab === "movements" && (
+                <>
+                  <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                    <KpiCard
+                      detail="Entradas pessoais cadastradas"
+                      icon={CircleDollarSign}
+                      title="Receitas"
+                      value={formatCurrency.format(personalFinanceTotals.income)}
+                    />
+                    <KpiCard
+                      detail="Saidas pessoais cadastradas"
+                      icon={WalletCards}
+                      title="Despesas"
+                      tone="clay"
+                      value={formatCurrency.format(personalFinanceTotals.expenses)}
+                    />
+                    <KpiCard
+                      detail={`Realizado ${formatCurrency.format(
+                        personalFinanceTotals.paidBalance
+                      )}`}
+                      icon={LineChart}
+                      title="Saldo previsto"
+                      tone={
+                        personalFinanceTotals.projectedBalance >= 0
+                          ? "moss"
+                          : "berry"
+                      }
+                      value={formatCurrency.format(
+                        personalFinanceTotals.projectedBalance
+                      )}
+                    />
+                    <KpiCard
+                      detail={`Em aberto ${formatCurrency.format(
+                        personalFinanceTotals.openAmount
+                      )}`}
+                      icon={RefreshCw}
+                      title="Vencidos"
+                      tone={personalFinanceTotals.overdue > 0 ? "berry" : "moss"}
+                      value={formatCurrency.format(personalFinanceTotals.overdue)}
+                    />
+                  </section>
+
+                  <section className="grid gap-5 xl:grid-cols-[380px_1fr]">
+                    <form
+                      className="rounded-lg border border-black/10 bg-white p-4 shadow-sm"
+                      onSubmit={savePersonalFinanceEntry}
+                    >
+                      <div className="flex items-center gap-2">
+                        <WalletCards aria-hidden className="h-5 w-5 text-sea" />
+                        <h2 className="text-lg font-bold">
+                          {editingPersonalFinanceId
+                            ? "Editar pessoal"
+                            : "Novo lancamento pessoal"}
+                        </h2>
+                      </div>
+
+                      <div className="mt-4 grid gap-3">
+                        <label className="grid gap-1 text-sm font-semibold">
+                          Tipo
+                          <select
+                            className="h-10 rounded-lg border border-black/10 bg-paper px-3 font-normal outline-none focus:ring-4 focus:ring-sea/20"
+                            onChange={(event) =>
+                              setPersonalFinanceForm((current) => ({
+                                ...current,
+                                type: event.target.value as FinanceEntryType
+                              }))
+                            }
+                            value={personalFinanceForm.type}
+                          >
+                            <option value="income">Receita</option>
+                            <option value="expense">Despesa</option>
+                          </select>
+                        </label>
+
+                        <label className="grid gap-1 text-sm font-semibold">
+                          Descricao
+                          <input
+                            className="h-10 rounded-lg border border-black/10 bg-paper px-3 font-normal outline-none focus:ring-4 focus:ring-sea/20"
+                            onChange={(event) =>
+                              setPersonalFinanceForm((current) => ({
+                                ...current,
+                                title: event.target.value
+                              }))
+                            }
+                            placeholder="Salario, cartao, aluguel"
+                            value={personalFinanceForm.title}
+                          />
+                        </label>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <label className="grid gap-1 text-sm font-semibold">
+                            Categoria
+                            <input
+                              className="h-10 rounded-lg border border-black/10 bg-paper px-3 font-normal outline-none focus:ring-4 focus:ring-sea/20"
+                              onChange={(event) =>
+                                setPersonalFinanceForm((current) => ({
+                                  ...current,
+                                  category: event.target.value
+                                }))
+                              }
+                              value={personalFinanceForm.category}
+                            />
+                          </label>
+                          <label className="grid gap-1 text-sm font-semibold">
+                            Valor
+                            <input
+                              className="h-10 rounded-lg border border-black/10 bg-paper px-3 font-normal outline-none focus:ring-4 focus:ring-sea/20"
+                              min="0"
+                              onChange={(event) =>
+                                setPersonalFinanceForm((current) => ({
+                                  ...current,
+                                  amount: event.target.value
+                                }))
+                              }
+                              placeholder="0,00"
+                              step="0.01"
+                              type="number"
+                              value={personalFinanceForm.amount}
+                            />
+                          </label>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <label className="grid gap-1 text-sm font-semibold">
+                            Vencimento
+                            <input
+                              className="h-10 rounded-lg border border-black/10 bg-paper px-3 font-normal outline-none focus:ring-4 focus:ring-sea/20"
+                              onChange={(event) =>
+                                setPersonalFinanceForm((current) => ({
+                                  ...current,
+                                  dueDate: event.target.value
+                                }))
+                              }
+                              type="date"
+                              value={personalFinanceForm.dueDate}
+                            />
+                          </label>
+                          <label className="grid gap-1 text-sm font-semibold">
+                            Status
+                            <select
+                              className="h-10 rounded-lg border border-black/10 bg-paper px-3 font-normal outline-none focus:ring-4 focus:ring-sea/20"
+                              onChange={(event) =>
+                                setPersonalFinanceForm((current) => ({
+                                  ...current,
+                                  status: event.target.value as FinanceEntryStatus,
+                                  paidAt:
+                                    event.target.value === "paid"
+                                      ? current.paidAt || dateOnly(new Date())
+                                      : ""
+                                }))
+                              }
+                              value={personalFinanceForm.status}
+                            >
+                              <option value="pending">Pendente</option>
+                              <option value="paid">Pago</option>
+                              <option value="overdue">Vencido</option>
+                            </select>
+                          </label>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <label className="grid gap-1 text-sm font-semibold">
+                            Pagamento
+                            <input
+                              className="h-10 rounded-lg border border-black/10 bg-paper px-3 font-normal outline-none focus:ring-4 focus:ring-sea/20"
+                              onChange={(event) =>
+                                setPersonalFinanceForm((current) => ({
+                                  ...current,
+                                  paidAt: event.target.value,
+                                  status: event.target.value ? "paid" : current.status
+                                }))
+                              }
+                              type="date"
+                              value={personalFinanceForm.paidAt}
+                            />
+                          </label>
+                          <label className="grid gap-1 text-sm font-semibold">
+                            Forma
+                            <input
+                              className="h-10 rounded-lg border border-black/10 bg-paper px-3 font-normal outline-none focus:ring-4 focus:ring-sea/20"
+                              onChange={(event) =>
+                                setPersonalFinanceForm((current) => ({
+                                  ...current,
+                                  paymentMethod: event.target.value
+                                }))
+                              }
+                              value={personalFinanceForm.paymentMethod}
+                            />
+                          </label>
+                        </div>
+
+                        <label className="grid gap-1 text-sm font-semibold">
+                          Observacoes
+                          <textarea
+                            className="min-h-20 rounded-lg border border-black/10 bg-paper px-3 py-2 font-normal outline-none focus:ring-4 focus:ring-sea/20"
+                            onChange={(event) =>
+                              setPersonalFinanceForm((current) => ({
+                                ...current,
+                                notes: event.target.value
+                              }))
+                            }
+                            value={personalFinanceForm.notes}
+                          />
+                        </label>
+
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          <button
+                            className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-ink px-4 text-sm font-bold text-white hover:bg-black"
+                            disabled={isSavingPersonalFinance}
+                            type="submit"
+                          >
+                            <Save aria-hidden className="h-4 w-4" />
+                            {isSavingPersonalFinance
+                              ? "Salvando"
+                              : editingPersonalFinanceId
+                                ? "Salvar"
+                                : "Adicionar"}
+                          </button>
+                          {editingPersonalFinanceId && (
+                            <button
+                              className="inline-flex h-11 items-center justify-center rounded-lg bg-paper px-4 text-sm font-bold text-ink ring-1 ring-black/10 hover:bg-black/[0.03]"
+                              onClick={resetPersonalFinanceForm}
+                              type="button"
+                            >
+                              Cancelar
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </form>
+
+                    <section className="rounded-lg border border-black/10 bg-white shadow-sm">
+                      <div className="border-b border-black/10 p-4">
+                        <h2 className="text-lg font-bold">Financeiro pessoal</h2>
+                        <p className="text-sm text-black/60">
+                          Entradas e saidas pessoais separadas do caixa da empresa.
+                        </p>
+                      </div>
+                      <div className="table-scroll overflow-x-auto">
+                        <table className="min-w-[980px] w-full text-left text-sm">
+                          <thead className="bg-black/[0.025] text-xs uppercase tracking-normal text-black/50">
+                            <tr>
+                              <th className="px-4 py-3">Status</th>
+                              <th className="px-4 py-3">Vencimento</th>
+                              <th className="px-4 py-3">Tipo</th>
+                              <th className="px-4 py-3">Descricao</th>
+                              <th className="px-4 py-3">Categoria</th>
+                              <th className="px-4 py-3">Valor</th>
+                              <th className="px-4 py-3">Acoes</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-black/10">
+                            {personalFinanceEntries.map((entry) => {
+                              const status = resolveFinanceStatus(
+                                entry.status,
+                                entry.dueDate,
+                                entry.paidAt
+                              );
+
+                              return (
+                                <tr
+                                  className="hover:bg-black/[0.018]"
+                                  key={entry.id}
+                                >
+                                  <td className="px-4 py-3">
+                                    <span
+                                      className={`inline-flex rounded-lg px-2 py-1 text-xs font-bold ring-1 ${financeStatusClass(status)}`}
+                                    >
+                                      {financeStatusLabel[status]}
+                                    </span>
+                                  </td>
+                                  <td className="px-4 py-3">
+                                    {new Date(
+                                      `${entry.dueDate}T00:00:00`
+                                    ).toLocaleDateString("pt-BR")}
+                                  </td>
+                                  <td className="px-4 py-3">
+                                    {financeTypeLabel[entry.type]}
+                                  </td>
+                                  <td className="px-4 py-3">
+                                    <p className="font-semibold text-ink">
+                                      {entry.title}
+                                    </p>
+                                    {entry.notes && (
+                                      <p className="text-xs text-black/45">
+                                        {entry.notes}
+                                      </p>
+                                    )}
+                                  </td>
+                                  <td className="px-4 py-3">{entry.category}</td>
+                                  <td
+                                    className={`px-4 py-3 font-bold ${
+                                      entry.type === "income"
+                                        ? "text-sea"
+                                        : "text-berry"
+                                    }`}
+                                  >
+                                    {formatCurrency.format(entry.amount)}
+                                  </td>
+                                  <td className="px-4 py-3">
+                                    <div className="flex flex-wrap gap-2">
+                                      <button
+                                        className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-paper px-3 text-sm font-bold text-ink ring-1 ring-black/10 hover:bg-black/[0.03]"
+                                        disabled={isSavingPersonalFinance}
+                                        onClick={() =>
+                                          startEditingPersonalFinance(entry)
+                                        }
+                                        type="button"
+                                      >
+                                        <Pencil aria-hidden className="h-4 w-4" />
+                                        Editar
+                                      </button>
+                                      <button
+                                        className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-berry/10 px-3 text-sm font-bold text-berry ring-1 ring-berry/20 hover:bg-berry/15"
+                                        disabled={isSavingPersonalFinance}
+                                        onClick={() =>
+                                          deletePersonalFinanceEntry(entry)
+                                        }
+                                        type="button"
+                                      >
+                                        <Trash2 aria-hidden className="h-4 w-4" />
+                                        Excluir
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                            {personalFinanceEntries.length === 0 && (
+                              <tr>
+                                <td
+                                  className="px-4 py-8 text-center text-black/55"
+                                  colSpan={7}
+                                >
+                                  Nenhum lancamento pessoal cadastrado.
+                                </td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </section>
+                  </section>
+                </>
+              )}
+
+              {personalFinanceTab === "loans" && (
+                <>
+                  <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                    <KpiCard
+                      detail={`Em aberto ${formatCurrency.format(
+                        personalLoanTotals.receivable
+                      )}`}
+                      icon={CircleDollarSign}
+                      title="Emprestei"
+                      value={formatCurrency.format(personalLoanTotals.lent)}
+                    />
+                    <KpiCard
+                      detail={`Saldo devedor ${formatCurrency.format(
+                        personalLoanTotals.payable
+                      )}`}
+                      icon={WalletCards}
+                      title="Peguei"
+                      tone="clay"
+                      value={formatCurrency.format(personalLoanTotals.borrowed)}
+                    />
+                    <KpiCard
+                      detail="Receber menos pagar"
+                      icon={LineChart}
+                      title="Saldo liquido"
+                      tone={
+                        personalLoanTotals.receivable - personalLoanTotals.payable >=
+                        0
+                          ? "moss"
+                          : "berry"
+                      }
+                      value={formatCurrency.format(
+                        personalLoanTotals.receivable - personalLoanTotals.payable
+                      )}
+                    />
+                    <KpiCard
+                      detail="Parcelas em atraso"
+                      icon={RefreshCw}
+                      title="Atrasados"
+                      tone={personalLoanTotals.late > 0 ? "berry" : "moss"}
+                      value={formatCurrency.format(personalLoanTotals.late)}
+                    />
+                  </section>
+
+                  <section className="grid gap-5 xl:grid-cols-[380px_1fr]">
+                    <form
+                      className="rounded-lg border border-black/10 bg-white p-4 shadow-sm"
+                      onSubmit={savePersonalLoan}
+                    >
+                      <div className="flex items-center gap-2">
+                        <CircleDollarSign aria-hidden className="h-5 w-5 text-sea" />
+                        <h2 className="text-lg font-bold">
+                          {editingLoanId ? "Editar emprestimo" : "Novo emprestimo"}
+                        </h2>
+                      </div>
+
+                      <div className="mt-4 grid gap-3">
+                        <label className="grid gap-1 text-sm font-semibold">
+                          Direcao
+                          <select
+                            className="h-10 rounded-lg border border-black/10 bg-paper px-3 font-normal outline-none focus:ring-4 focus:ring-sea/20"
+                            onChange={(event) =>
+                              setPersonalLoanForm((current) => ({
+                                ...current,
+                                direction: event.target.value as LoanDirection
+                              }))
+                            }
+                            value={personalLoanForm.direction}
+                          >
+                            <option value="lent">Emprestei</option>
+                            <option value="borrowed">Peguei</option>
+                          </select>
+                        </label>
+
+                        <label className="grid gap-1 text-sm font-semibold">
+                          Pessoa ou instituicao
+                          <input
+                            className="h-10 rounded-lg border border-black/10 bg-paper px-3 font-normal outline-none focus:ring-4 focus:ring-sea/20"
+                            onChange={(event) =>
+                              setPersonalLoanForm((current) => ({
+                                ...current,
+                                personName: event.target.value
+                              }))
+                            }
+                            value={personalLoanForm.personName}
+                          />
+                        </label>
+
+                        <label className="grid gap-1 text-sm font-semibold">
+                          Descricao
+                          <input
+                            className="h-10 rounded-lg border border-black/10 bg-paper px-3 font-normal outline-none focus:ring-4 focus:ring-sea/20"
+                            onChange={(event) =>
+                              setPersonalLoanForm((current) => ({
+                                ...current,
+                                description: event.target.value
+                              }))
+                            }
+                            placeholder="Contrato, combinado, parcela"
+                            value={personalLoanForm.description}
+                          />
+                        </label>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <label className="grid gap-1 text-sm font-semibold">
+                            Valor principal
+                            <input
+                              className="h-10 rounded-lg border border-black/10 bg-paper px-3 font-normal outline-none focus:ring-4 focus:ring-sea/20"
+                              min="0"
+                              onChange={(event) =>
+                                setPersonalLoanForm((current) => ({
+                                  ...current,
+                                  principalAmount: event.target.value
+                                }))
+                              }
+                              step="0.01"
+                              type="number"
+                              value={personalLoanForm.principalAmount}
+                            />
+                          </label>
+                          <label className="grid gap-1 text-sm font-semibold">
+                            Valor pago
+                            <input
+                              className="h-10 rounded-lg border border-black/10 bg-paper px-3 font-normal outline-none focus:ring-4 focus:ring-sea/20"
+                              min="0"
+                              onChange={(event) =>
+                                setPersonalLoanForm((current) => ({
+                                  ...current,
+                                  paidAmount: event.target.value
+                                }))
+                              }
+                              step="0.01"
+                              type="number"
+                              value={personalLoanForm.paidAmount}
+                            />
+                          </label>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <label className="grid gap-1 text-sm font-semibold">
+                            Inicio
+                            <input
+                              className="h-10 rounded-lg border border-black/10 bg-paper px-3 font-normal outline-none focus:ring-4 focus:ring-sea/20"
+                              onChange={(event) =>
+                                setPersonalLoanForm((current) => ({
+                                  ...current,
+                                  startDate: event.target.value
+                                }))
+                              }
+                              type="date"
+                              value={personalLoanForm.startDate}
+                            />
+                          </label>
+                          <label className="grid gap-1 text-sm font-semibold">
+                            Vencimento
+                            <input
+                              className="h-10 rounded-lg border border-black/10 bg-paper px-3 font-normal outline-none focus:ring-4 focus:ring-sea/20"
+                              onChange={(event) =>
+                                setPersonalLoanForm((current) => ({
+                                  ...current,
+                                  dueDate: event.target.value
+                                }))
+                              }
+                              type="date"
+                              value={personalLoanForm.dueDate}
+                            />
+                          </label>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <label className="grid gap-1 text-sm font-semibold">
+                            Juros (% a.m.)
+                            <input
+                              className="h-10 rounded-lg border border-black/10 bg-paper px-3 font-normal outline-none focus:ring-4 focus:ring-sea/20"
+                              min="0"
+                              onChange={(event) =>
+                                setPersonalLoanForm((current) => ({
+                                  ...current,
+                                  interestRate: event.target.value
+                                }))
+                              }
+                              step="0.01"
+                              type="number"
+                              value={personalLoanForm.interestRate}
+                            />
+                          </label>
+                          <label className="grid gap-1 text-sm font-semibold">
+                            Status
+                            <select
+                              className="h-10 rounded-lg border border-black/10 bg-paper px-3 font-normal outline-none focus:ring-4 focus:ring-sea/20"
+                              onChange={(event) =>
+                                setPersonalLoanForm((current) => ({
+                                  ...current,
+                                  status: event.target.value as LoanStatus
+                                }))
+                              }
+                              value={personalLoanForm.status}
+                            >
+                              <option value="active">Em aberto</option>
+                              <option value="settled">Quitado</option>
+                              <option value="late">Atrasado</option>
+                            </select>
+                          </label>
+                        </div>
+
+                        <label className="grid gap-1 text-sm font-semibold">
+                          Observacoes
+                          <textarea
+                            className="min-h-20 rounded-lg border border-black/10 bg-paper px-3 py-2 font-normal outline-none focus:ring-4 focus:ring-sea/20"
+                            onChange={(event) =>
+                              setPersonalLoanForm((current) => ({
+                                ...current,
+                                notes: event.target.value
+                              }))
+                            }
+                            value={personalLoanForm.notes}
+                          />
+                        </label>
+
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          <button
+                            className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-ink px-4 text-sm font-bold text-white hover:bg-black"
+                            disabled={isSavingLoan}
+                            type="submit"
+                          >
+                            <Save aria-hidden className="h-4 w-4" />
+                            {isSavingLoan
+                              ? "Salvando"
+                              : editingLoanId
+                                ? "Salvar"
+                                : "Adicionar"}
+                          </button>
+                          {editingLoanId && (
+                            <button
+                              className="inline-flex h-11 items-center justify-center rounded-lg bg-paper px-4 text-sm font-bold text-ink ring-1 ring-black/10 hover:bg-black/[0.03]"
+                              onClick={resetPersonalLoanForm}
+                              type="button"
+                            >
+                              Cancelar
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </form>
+
+                    <section className="rounded-lg border border-black/10 bg-white shadow-sm">
+                      <div className="border-b border-black/10 p-4">
+                        <h2 className="text-lg font-bold">Emprestimos pessoais</h2>
+                        <p className="text-sm text-black/60">
+                          Acompanhe o que voce emprestou e o que pegou emprestado.
+                        </p>
+                      </div>
+                      <div className="table-scroll overflow-x-auto">
+                        <table className="min-w-[1080px] w-full text-left text-sm">
+                          <thead className="bg-black/[0.025] text-xs uppercase tracking-normal text-black/50">
+                            <tr>
+                              <th className="px-4 py-3">Status</th>
+                              <th className="px-4 py-3">Direcao</th>
+                              <th className="px-4 py-3">Pessoa</th>
+                              <th className="px-4 py-3">Descricao</th>
+                              <th className="px-4 py-3">Principal</th>
+                              <th className="px-4 py-3">Pago</th>
+                              <th className="px-4 py-3">Saldo</th>
+                              <th className="px-4 py-3">Vencimento</th>
+                              <th className="px-4 py-3">Acoes</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-black/10">
+                            {personalLoans.map((loan) => {
+                              const status = resolveLoanStatus(
+                                loan.status,
+                                loan.dueDate,
+                                loan.principalAmount,
+                                loan.paidAmount
+                              );
+                              const openAmount = Math.max(
+                                loan.principalAmount - loan.paidAmount,
+                                0
+                              );
+
+                              return (
+                                <tr
+                                  className="hover:bg-black/[0.018]"
+                                  key={loan.id}
+                                >
+                                  <td className="px-4 py-3">
+                                    <span
+                                      className={`inline-flex rounded-lg px-2 py-1 text-xs font-bold ring-1 ${loanStatusClass(status)}`}
+                                    >
+                                      {loanStatusLabel[status]}
+                                    </span>
+                                  </td>
+                                  <td className="px-4 py-3">
+                                    {loanDirectionLabel[loan.direction]}
+                                  </td>
+                                  <td className="px-4 py-3 font-semibold">
+                                    {loan.personName}
+                                  </td>
+                                  <td className="px-4 py-3">
+                                    <p className="font-semibold text-ink">
+                                      {loan.description}
+                                    </p>
+                                    {loan.interestRate > 0 && (
+                                      <p className="text-xs text-black/45">
+                                        Juros {loan.interestRate.toLocaleString("pt-BR", {
+                                          maximumFractionDigits: 2
+                                        })}
+                                        % a.m.
+                                      </p>
+                                    )}
+                                  </td>
+                                  <td className="px-4 py-3">
+                                    {formatCurrency.format(loan.principalAmount)}
+                                  </td>
+                                  <td className="px-4 py-3">
+                                    {formatCurrency.format(loan.paidAmount)}
+                                  </td>
+                                  <td
+                                    className={`px-4 py-3 font-bold ${
+                                      loan.direction === "lent"
+                                        ? "text-sea"
+                                        : "text-berry"
+                                    }`}
+                                  >
+                                    {formatCurrency.format(openAmount)}
+                                  </td>
+                                  <td className="px-4 py-3">
+                                    {new Date(
+                                      `${loan.dueDate}T00:00:00`
+                                    ).toLocaleDateString("pt-BR")}
+                                  </td>
+                                  <td className="px-4 py-3">
+                                    <div className="flex flex-wrap gap-2">
+                                      <button
+                                        className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-paper px-3 text-sm font-bold text-ink ring-1 ring-black/10 hover:bg-black/[0.03]"
+                                        disabled={isSavingLoan}
+                                        onClick={() => startEditingLoan(loan)}
+                                        type="button"
+                                      >
+                                        <Pencil aria-hidden className="h-4 w-4" />
+                                        Editar
+                                      </button>
+                                      <button
+                                        className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-berry/10 px-3 text-sm font-bold text-berry ring-1 ring-berry/20 hover:bg-berry/15"
+                                        disabled={isSavingLoan}
+                                        onClick={() => deletePersonalLoan(loan)}
+                                        type="button"
+                                      >
+                                        <Trash2 aria-hidden className="h-4 w-4" />
+                                        Excluir
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                            {personalLoans.length === 0 && (
+                              <tr>
+                                <td
+                                  className="px-4 py-8 text-center text-black/55"
+                                  colSpan={9}
+                                >
+                                  Nenhum emprestimo cadastrado.
+                                </td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </section>
+                  </section>
+                </>
+              )}
             </section>
           )}
 
