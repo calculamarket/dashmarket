@@ -1522,6 +1522,12 @@ export function DashmarketDashboard() {
   }, [isSidebarCollapsed]);
 
   useEffect(() => {
+    if (selectedProvider !== "mercadolivre") {
+      setSelectedProvider("mercadolivre");
+    }
+  }, [selectedProvider]);
+
+  useEffect(() => {
     if (productOptions.length === 0) return;
 
     setCostForm((current) =>
@@ -1546,6 +1552,8 @@ export function DashmarketDashboard() {
   const mercadoLivreAccount = marketplaceAccounts.find(
     (account) => account.provider === "mercadolivre" && account.status === "connected"
   );
+  const isMarketplaceWorkspaceReady =
+    supabaseStatus === "connected" && Boolean(organization);
   const isSyncingMarketplace =
     isSyncingListings ||
     isSyncingOrders ||
@@ -1553,11 +1561,24 @@ export function DashmarketDashboard() {
     isSyncingAdvertising ||
     isSyncingPromotions;
   const isMarketplaceActionDisabled =
-    selectedProvider !== "mercadolivre" ||
-    supabaseStatus !== "connected" ||
-    isSyncingMarketplace;
+    !isMarketplaceWorkspaceReady || isSyncingMarketplace;
   const isMarketplaceConnectDisabled =
-    isMarketplaceActionDisabled || isConnectingMarketplace;
+    !isMarketplaceWorkspaceReady ||
+    isConnectingMarketplace ||
+    Boolean(mercadoLivreAccount && isSyncingMarketplace);
+  const selectedMarketplaceActionDisabled =
+    selectedProvider !== "mercadolivre" ||
+    (mercadoLivreAccount
+      ? isMarketplaceActionDisabled
+      : isMarketplaceConnectDisabled);
+  const marketplaceConnectionHint =
+    supabaseStatus === "checking"
+      ? "Aguarde a sessao carregar para conectar o Mercado Livre."
+      : supabaseStatus !== "connected"
+        ? "Entre no DASHMARKET para conectar o Mercado Livre."
+        : !organization
+          ? "Usuario autenticado, mas sem empresa vinculada."
+          : null;
   const marketplaceSkuActionLabel = isConnectingMarketplace
     ? "Conectando"
     : isSyncingListings
@@ -2439,7 +2460,17 @@ export function DashmarketDashboard() {
       .eq("organization_id", organizationId)
       .order("last_sync_at", { ascending: false });
 
-    if (error) throw error;
+    if (error) {
+      if (isMissingRelationError(error)) {
+        setMarketplaceAccounts([]);
+        setDataMessage(
+          "Conector do Mercado Livre pronto, mas a tabela de marketplaces ainda nao existe no Supabase."
+        );
+        return;
+      }
+
+      throw error;
+    }
 
     setMarketplaceAccounts((data ?? []) as MarketplaceAccountRow[]);
   }, [supabaseClient]);
@@ -3625,8 +3656,13 @@ export function DashmarketDashboard() {
   }
 
   async function connectMercadoLivre() {
-    if (!organization) {
+    if (supabaseStatus !== "connected") {
       setDataMessage("Entre no DASHMARKET antes de conectar o Mercado Livre.");
+      return;
+    }
+
+    if (!organization) {
+      setDataMessage("Usuario autenticado, mas sem empresa vinculada.");
       return;
     }
 
@@ -4191,16 +4227,22 @@ export function DashmarketDashboard() {
               ))}
             </div>
             <button
-              className="mt-4 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-white px-3 text-sm font-bold text-ink hover:bg-paper"
+              className="mt-4 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-white px-3 text-sm font-bold text-ink hover:bg-paper disabled:cursor-not-allowed disabled:opacity-50"
               disabled={isMarketplaceConnectDisabled}
               onClick={
                 mercadoLivreAccount ? syncMercadoLivreListings : connectMercadoLivre
               }
+              title={marketplaceConnectionHint ?? marketplaceSkuActionLabel}
               type="button"
             >
               <Cable aria-hidden className="h-4 w-4" />
               {marketplaceSkuActionLabel}
             </button>
+            {marketplaceConnectionHint && (
+              <p className="mt-2 text-xs font-semibold text-white/65">
+                {marketplaceConnectionHint}
+              </p>
+            )}
             {mercadoLivreAccount && (
               <button
                 className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-teal-200 px-3 text-sm font-bold text-ink hover:bg-teal-100"
@@ -4255,7 +4297,7 @@ export function DashmarketDashboard() {
                 onClick={
                   mercadoLivreAccount ? syncMercadoLivreListings : connectMercadoLivre
                 }
-                title={marketplaceSkuActionLabel}
+                title={marketplaceConnectionHint ?? marketplaceSkuActionLabel}
                 type="button"
               >
                 <Cable aria-hidden className="h-4 w-4" />
@@ -4354,10 +4396,18 @@ export function DashmarketDashboard() {
                     className={`h-9 rounded-md px-3 text-sm font-semibold ${
                       selectedProvider === adapter.provider
                         ? "bg-ink text-white"
-                        : "text-black/60 hover:bg-black/[0.04]"
+                        : adapter.provider === "mercadolivre"
+                          ? "text-black/60 hover:bg-black/[0.04]"
+                          : "cursor-not-allowed text-black/35"
                     }`}
+                    disabled={adapter.provider !== "mercadolivre"}
                     key={adapter.provider}
                     onClick={() => setSelectedProvider(adapter.provider)}
+                    title={
+                      adapter.provider === "mercadolivre"
+                        ? adapter.displayName
+                        : `${adapter.displayName} em breve`
+                    }
                     type="button"
                   >
                     {adapter.displayName}
@@ -4365,7 +4415,7 @@ export function DashmarketDashboard() {
                 ))}
               </div>
               <button
-                className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-sea px-4 text-sm font-bold text-white shadow-sm hover:bg-teal-800"
+                className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-sea px-4 text-sm font-bold text-white shadow-sm hover:bg-teal-800 disabled:cursor-not-allowed disabled:bg-sea/45"
                 onClick={
                   selectedProvider === "mercadolivre"
                     ? mercadoLivreAccount
@@ -4373,12 +4423,8 @@ export function DashmarketDashboard() {
                       : connectMercadoLivre
                     : undefined
                 }
-                disabled={
-                  selectedProvider !== "mercadolivre" ||
-                  supabaseStatus !== "connected" ||
-                  isConnectingMarketplace ||
-                  isSyncingMarketplace
-                }
+                disabled={selectedMarketplaceActionDisabled}
+                title={marketplaceConnectionHint ?? undefined}
                 type="button"
               >
                 <RefreshCw aria-hidden className="h-4 w-4" />
