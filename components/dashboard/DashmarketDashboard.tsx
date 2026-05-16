@@ -465,6 +465,66 @@ type AiSalesWindow = {
   quantity: number;
 };
 
+type OpenAiBusinessAnalysisItem = {
+  title: string;
+  severity: AiInsightSeverity;
+  summary: string;
+  evidence: string;
+  recommendation: string;
+};
+
+type OpenAiRecommendedAction = {
+  priority: string;
+  action: string;
+  expectedImpact: string;
+  reason: string;
+};
+
+type OpenAiSkuHighlight = {
+  sku: string;
+  title: string;
+  severity: AiInsightSeverity;
+  issue: string;
+  evidence: string;
+  action: string;
+};
+
+type OpenAiBusinessAnalysis = {
+  score: number;
+  status: AiInsightSeverity;
+  executiveSummary: string;
+  diagnosis: OpenAiBusinessAnalysisItem[];
+  opportunities: OpenAiBusinessAnalysisItem[];
+  risks: OpenAiBusinessAnalysisItem[];
+  recommendedActions: OpenAiRecommendedAction[];
+  adsAnalysis: {
+    verdict: string;
+    tacosRead: string;
+    investmentRead: string;
+    recommendation: string;
+  };
+  profitabilityAnalysis: {
+    verdict: string;
+    marginRead: string;
+    trendRead: string;
+    recommendation: string;
+  };
+  stockAnalysis: {
+    verdict: string;
+    capitalRead: string;
+    riskRead: string;
+    recommendation: string;
+  };
+  skuHighlights: OpenAiSkuHighlight[];
+  questionsToInvestigate: string[];
+};
+
+type OpenAiBusinessAnalysisResponse = {
+  analysis: OpenAiBusinessAnalysis;
+  generatedAt: string;
+  model: string;
+};
+
 type AdvertisingMetricRow = {
   impressions: number | string;
   clicks: number | string;
@@ -1505,6 +1565,9 @@ export function DashmarketDashboard() {
   >([]);
   const [dataMessage, setDataMessage] = useState<string | null>(null);
   const [isSavingCost, setIsSavingCost] = useState(false);
+  const [openAiAnalysis, setOpenAiAnalysis] =
+    useState<OpenAiBusinessAnalysis | null>(null);
+  const [isGeneratingAiAnalysis, setIsGeneratingAiAnalysis] = useState(false);
   const [isConnectingMarketplace, setIsConnectingMarketplace] = useState(false);
   const [isDiagnosingMarketplace, setIsDiagnosingMarketplace] = useState(false);
   const [isSyncingListings, setIsSyncingListings] = useState(false);
@@ -4387,6 +4450,120 @@ export function DashmarketDashboard() {
     }
   }
 
+  async function generateOpenAiBusinessAnalysis() {
+    if (!supabaseClient || !organization) {
+      setDataMessage("Entre no DASHMARKET antes de gerar a analise com IA.");
+      return;
+    }
+
+    setIsGeneratingAiAnalysis(true);
+    setDataMessage(null);
+
+    try {
+      const { data: sessionData, error: sessionError } =
+        await supabaseClient.auth.getSession();
+
+      if (sessionError) throw sessionError;
+
+      const accessToken = sessionData.session?.access_token;
+      if (!accessToken) throw new Error("Sessao expirada. Entre novamente.");
+
+      const topProducts = productUnitRows
+        .filter((product) => product.hasSales)
+        .sort((current, next) => next.grossRevenue - current.grossRevenue)
+        .slice(0, 15)
+        .map((product) => ({
+          sku: product.sku,
+          title: product.title,
+          units: product.units,
+          orders: product.orders,
+          grossRevenue: product.grossRevenue,
+          averagePrice: product.averagePrice,
+          totalCostUnit: product.totalCostUnit,
+          contributionMarginUnit: product.contributionMarginUnit,
+          contributionMarginRate: product.contributionMarginRate,
+          advertisingAmount: product.advertisingAmount,
+          advertisingUnit: product.advertisingUnit,
+          tacosRate: product.tacosRate,
+          attributedRevenue: product.attributedRevenue
+        }));
+
+      const recentSales = salesDetailRows.slice(0, 15).map((sale) => ({
+        orderId: sale.orderId,
+        sku: sale.sku,
+        title: sale.title,
+        soldAt: sale.soldAt,
+        status: sale.status,
+        quantity: sale.quantity,
+        grossAmount: sale.grossAmount,
+        marketplaceFee: sale.marketplaceFee,
+        shippingBuyer: sale.shippingBuyer,
+        shippingSeller: sale.shippingSeller,
+        costAmount: sale.costAmount,
+        taxAmount: sale.taxAmount,
+        contributionMargin: sale.contributionMargin,
+        marginRate: sale.marginRate
+      }));
+
+      const response = await fetch("/api/ai/business-analysis", {
+        body: JSON.stringify({
+          organizationId: organization.id,
+          generatedAt: new Date().toISOString(),
+          source: {
+            demoData: shouldUseDemoData,
+            connectedAccount: mercadoLivreAccount?.account_name ?? null,
+            connectedSellerId: mercadoLivreAccount?.external_seller_id ?? null,
+            products: productOptions.length,
+            costs: costs.length,
+            salesRows: salesDetailRows.length
+          },
+          overview: {
+            aiBusinessScore,
+            marginRate,
+            totals,
+            salesDetailTotals,
+            productUnitTotals
+          },
+          trend: aiSalesTrend,
+          ads: aiAdsMetrics,
+          inventory: inventoryValuationTotals,
+          finance: {
+            company: companyFinanceTotals,
+            companyByCategory: companyFinanceByCategory.slice(0, 10),
+            personal: personalFinanceTotals,
+            loans: personalLoanTotals
+          },
+          localInsights: aiInsights,
+          prioritySkus: aiSkuPriorities,
+          topProducts,
+          recentSales
+        }),
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        method: "POST"
+      });
+      const payload = await readApiPayload<OpenAiBusinessAnalysisResponse>(
+        response
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          apiErrorMessage(payload, "Nao foi possivel gerar a analise com IA.")
+        );
+      }
+
+      const result = payload as OpenAiBusinessAnalysisResponse;
+      setOpenAiAnalysis(result.analysis);
+      setDataMessage(`Analise OpenAI gerada com ${result.model}.`);
+    } catch (error) {
+      setDataMessage(errorMessage(error, "Nao foi possivel gerar a analise com IA."));
+    } finally {
+      setIsGeneratingAiAnalysis(false);
+    }
+  }
+
   async function connectMercadoLivre() {
     if (supabaseStatus !== "connected") {
       setDataMessage("Entre no DASHMARKET antes de conectar o Mercado Livre.");
@@ -5555,16 +5732,113 @@ export function DashmarketDashboard() {
 
               <section className="grid gap-5 xl:grid-cols-[1.15fr_0.85fr]">
                 <section className="rounded-lg border border-black/10 bg-white shadow-sm">
-                  <div className="border-b border-black/10 p-4">
-                    <div className="flex items-center gap-2">
-                      <BrainCircuit aria-hidden className="h-5 w-5 text-sea" />
-                      <h2 className="text-lg font-bold">Leitura IA do negócio</h2>
+                  <div className="flex flex-col gap-3 border-b border-black/10 p-4 lg:flex-row lg:items-center lg:justify-between">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <BrainCircuit aria-hidden className="h-5 w-5 text-sea" />
+                        <h2 className="text-lg font-bold">Leitura IA do negócio</h2>
+                      </div>
+                      <p className="mt-1 text-sm text-black/60">
+                        Diagnóstico consolidado de margem, vendas, ADS e estoque.
+                      </p>
                     </div>
-                    <p className="mt-1 text-sm text-black/60">
-                      Diagnóstico consolidado de margem, vendas, ADS e estoque.
-                    </p>
+                    <button
+                      className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-ink px-4 text-sm font-bold text-white transition hover:bg-black disabled:cursor-not-allowed disabled:opacity-50"
+                      disabled={
+                        !organization || !supabaseClient || isGeneratingAiAnalysis
+                      }
+                      onClick={() => void generateOpenAiBusinessAnalysis()}
+                      type="button"
+                    >
+                      {isGeneratingAiAnalysis ? (
+                        <RefreshCw aria-hidden className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <BrainCircuit aria-hidden className="h-4 w-4" />
+                      )}
+                      {isGeneratingAiAnalysis
+                        ? "Analisando"
+                        : "Analisar com OpenAI"}
+                    </button>
                   </div>
                   <div className="grid gap-3 p-4">
+                    {openAiAnalysis && (
+                      <article className="rounded-lg border border-teal-200 bg-teal-50 p-4">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                          <div>
+                            <span
+                              className={`inline-flex rounded-lg px-2 py-1 text-xs font-bold ring-1 ${aiSeverityClass(openAiAnalysis.status)}`}
+                            >
+                              OpenAI - {aiSeverityLabel(openAiAnalysis.status)}
+                            </span>
+                            <h3 className="mt-3 text-lg font-black">
+                              Score {Math.round(openAiAnalysis.score)}/100
+                            </h3>
+                            <p className="mt-2 text-sm leading-relaxed text-black/70">
+                              {openAiAnalysis.executiveSummary}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="mt-4 grid gap-3 lg:grid-cols-3">
+                          {[
+                            [
+                              "ADS",
+                              openAiAnalysis.adsAnalysis.verdict,
+                              openAiAnalysis.adsAnalysis.recommendation
+                            ],
+                            [
+                              "Margem",
+                              openAiAnalysis.profitabilityAnalysis.verdict,
+                              openAiAnalysis.profitabilityAnalysis.recommendation
+                            ],
+                            [
+                              "Estoque",
+                              openAiAnalysis.stockAnalysis.verdict,
+                              openAiAnalysis.stockAnalysis.recommendation
+                            ]
+                          ].map(([label, title, detail]) => (
+                            <div
+                              className="rounded-lg border border-black/10 bg-white p-3"
+                              key={label}
+                            >
+                              <p className="text-xs font-bold uppercase tracking-normal text-black/45">
+                                {label}
+                              </p>
+                              <p className="mt-1 font-bold">{title}</p>
+                              <p className="mt-1 text-xs leading-relaxed text-black/60">
+                                {detail}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+
+                        <div className="mt-4 grid gap-3">
+                          {openAiAnalysis.recommendedActions
+                            .slice(0, 4)
+                            .map((action) => (
+                              <div
+                                className="rounded-lg border border-black/10 bg-white p-3"
+                                key={`${action.priority}-${action.action}`}
+                              >
+                                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                                  <div>
+                                    <p className="text-xs font-bold uppercase tracking-normal text-black/45">
+                                      Prioridade {action.priority}
+                                    </p>
+                                    <p className="mt-1 font-bold">{action.action}</p>
+                                  </div>
+                                  <span className="rounded-lg bg-teal-50 px-2 py-1 text-xs font-bold text-sea ring-1 ring-teal-100">
+                                    {action.expectedImpact}
+                                  </span>
+                                </div>
+                                <p className="mt-2 text-sm text-black/65">
+                                  {action.reason}
+                                </p>
+                              </div>
+                            ))}
+                        </div>
+                      </article>
+                    )}
                     {aiInsights.map((insight) => (
                       <article
                         className="rounded-lg border border-black/10 bg-paper p-4"
