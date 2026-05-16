@@ -1083,13 +1083,49 @@ function defaultOrganizationSlug(userId: string) {
   return `dashmarket-${userId.replace(/-/g, "").slice(0, 12)}`;
 }
 
+type DatabaseErrorLike = {
+  code?: string;
+  message?: string;
+  details?: string;
+  hint?: string;
+};
+
+function databaseErrorInfo(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return { code: undefined, text: "" };
+  }
+
+  const databaseError = error as DatabaseErrorLike;
+  return {
+    code: databaseError.code,
+    text: [databaseError.message, databaseError.details, databaseError.hint]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase()
+  };
+}
+
 function isMissingRelationError(error: unknown) {
-  if (!error || typeof error !== "object") return false;
+  const { code, text } = databaseErrorInfo(error);
 
-  const maybeError = error as { code?: string; message?: string };
-  const message = maybeError.message?.toLowerCase() ?? "";
+  return (
+    code === "42P01" ||
+    code === "PGRST205" ||
+    text.includes("does not exist") ||
+    text.includes("could not find the table") ||
+    text.includes("schema cache")
+  );
+}
 
-  return maybeError.code === "42P01" || message.includes("does not exist");
+function isMissingStorageSchemaError(error: unknown) {
+  const { code, text } = databaseErrorInfo(error);
+
+  return (
+    isMissingRelationError(error) ||
+    code === "42703" ||
+    code === "PGRST204" ||
+    text.includes("could not find the column")
+  );
 }
 
 function resolveFinanceStatus(
@@ -1415,7 +1451,19 @@ function apiErrorMessage(payload: unknown, fallback: string) {
 }
 
 function errorMessage(error: unknown, fallback: string) {
-  return error instanceof Error ? error.message : fallback;
+  if (error instanceof Error) return error.message;
+
+  if (error && typeof error === "object") {
+    const databaseError = error as DatabaseErrorLike;
+    const mainMessage = databaseError.message ?? fallback;
+    const details = [databaseError.details, databaseError.hint]
+      .filter(Boolean)
+      .join(" ");
+
+    return details ? `${mainMessage} ${details}` : mainMessage;
+  }
+
+  return fallback;
 }
 
 export function DashmarketDashboard() {
@@ -2946,7 +2994,7 @@ export function DashmarketDashboard() {
       .limit(1000);
 
     if (error) {
-      if (isMissingRelationError(error)) {
+      if (isMissingStorageSchemaError(error)) {
         setCompanyFinanceEntries(companyFinanceSeed);
         return;
       }
@@ -2972,7 +3020,7 @@ export function DashmarketDashboard() {
       .limit(1000);
 
     if (error) {
-      if (isMissingRelationError(error)) {
+      if (isMissingStorageSchemaError(error)) {
         setPersonalFinanceEntries(personalFinanceSeed);
         return;
       }
@@ -2998,7 +3046,7 @@ export function DashmarketDashboard() {
       .limit(1000);
 
     if (error) {
-      if (isMissingRelationError(error)) {
+      if (isMissingStorageSchemaError(error)) {
         setPersonalLoans(personalLoanSeed);
         return;
       }
@@ -3434,11 +3482,9 @@ export function DashmarketDashboard() {
         );
       } catch (error) {
         setDataMessage(
-          isMissingRelationError(error)
+          isMissingStorageSchemaError(error)
             ? "Financeiro ainda nao existe no Supabase. Execute a migration de financeiro e tente novamente."
-            : error instanceof Error
-              ? error.message
-              : "Nao foi possivel salvar o financeiro da empresa."
+            : errorMessage(error, "Nao foi possivel salvar o financeiro da empresa.")
         );
       } finally {
         setIsSavingCompanyFinance(false);
@@ -3497,11 +3543,9 @@ export function DashmarketDashboard() {
         );
       } catch (error) {
         setDataMessage(
-          isMissingRelationError(error)
+          isMissingStorageSchemaError(error)
             ? "Financeiro pessoal ainda nao existe no Supabase. Execute a migration de financeiro e tente novamente."
-            : error instanceof Error
-              ? error.message
-              : "Nao foi possivel salvar o financeiro pessoal."
+            : errorMessage(error, "Nao foi possivel salvar o financeiro pessoal.")
         );
       } finally {
         setIsSavingPersonalFinance(false);
@@ -3559,11 +3603,9 @@ export function DashmarketDashboard() {
         );
       } catch (error) {
         setDataMessage(
-          isMissingRelationError(error)
+          isMissingStorageSchemaError(error)
             ? "A aba de emprestimos ainda nao existe no Supabase. Execute a migration de financeiro e tente novamente."
-            : error instanceof Error
-              ? error.message
-              : "Nao foi possivel salvar o emprestimo."
+            : errorMessage(error, "Nao foi possivel salvar o emprestimo.")
         );
       } finally {
         setIsSavingLoan(false);
@@ -3627,7 +3669,7 @@ export function DashmarketDashboard() {
         }
         setDataMessage("Lancamento da empresa excluido.");
       } catch (error) {
-        if (isMissingRelationError(error)) {
+        if (isMissingStorageSchemaError(error)) {
           removeLocalEntry();
           setDataMessage(
             "Lancamento removido da lista. Execute a migration do financeiro para salvar exclusoes no Supabase."
@@ -3636,9 +3678,7 @@ export function DashmarketDashboard() {
         }
 
         setDataMessage(
-          error instanceof Error
-            ? error.message
-            : "Nao foi possivel excluir o lancamento da empresa."
+          errorMessage(error, "Nao foi possivel excluir o lancamento da empresa.")
         );
       } finally {
         setIsSavingCompanyFinance(false);
@@ -3667,10 +3707,18 @@ export function DashmarketDashboard() {
         await loadPersonalFinance(userId);
         setDataMessage("Lancamento pessoal excluido.");
       } catch (error) {
+        if (isMissingStorageSchemaError(error)) {
+          setPersonalFinanceEntries((current) =>
+            current.filter((item) => item.id !== entry.id)
+          );
+          setDataMessage(
+            "Lancamento removido da lista. Execute a migration do financeiro para salvar exclusoes no Supabase."
+          );
+          return;
+        }
+
         setDataMessage(
-          error instanceof Error
-            ? error.message
-            : "Nao foi possivel excluir o lancamento pessoal."
+          errorMessage(error, "Nao foi possivel excluir o lancamento pessoal.")
         );
       } finally {
         setIsSavingPersonalFinance(false);
@@ -3701,10 +3749,16 @@ export function DashmarketDashboard() {
         await loadPersonalLoans(userId);
         setDataMessage("Emprestimo excluido.");
       } catch (error) {
+        if (isMissingStorageSchemaError(error)) {
+          setPersonalLoans((current) => current.filter((item) => item.id !== loan.id));
+          setDataMessage(
+            "Emprestimo removido da lista. Execute a migration do financeiro para salvar exclusoes no Supabase."
+          );
+          return;
+        }
+
         setDataMessage(
-          error instanceof Error
-            ? error.message
-            : "Nao foi possivel excluir o emprestimo."
+          errorMessage(error, "Nao foi possivel excluir o emprestimo.")
         );
       } finally {
         setIsSavingLoan(false);
