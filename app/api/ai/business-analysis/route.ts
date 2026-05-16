@@ -13,6 +13,16 @@ type AnalysisRequestBody = {
   [key: string]: unknown;
 };
 
+type OrganizationMemberRow = {
+  organization_id: string;
+  user_id: string;
+};
+
+type OrganizationRow = {
+  id: string;
+  name: string;
+};
+
 type OpenAiErrorPayload = {
   error?: {
     message?: string;
@@ -207,6 +217,7 @@ export async function POST(request: Request) {
   const openAiKey = process.env.OPENAI_API_KEY?.trim();
   const model = process.env.OPENAI_MODEL?.trim() || DEFAULT_OPENAI_MODEL;
   const publicSupabaseConfig = resolvePublicSupabaseConfig();
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
   const accessToken = bearerToken(request);
 
   if (!publicSupabaseConfig) {
@@ -224,7 +235,26 @@ export async function POST(request: Request) {
     return jsonError(400, "Empresa nao identificada para analise.");
   }
 
-  const supabase = createClient(
+  const authClient = createClient(
+    publicSupabaseConfig.url,
+    serviceRoleKey || publicSupabaseConfig.anonKey,
+    {
+      auth: { persistSession: false }
+    }
+  );
+
+  const { data: userData, error: userError } =
+    await authClient.auth.getUser(accessToken);
+
+  if (userError || !userData.user) {
+    return jsonError(
+      401,
+      "Sessao do DASHMARKET invalida ou expirada.",
+      userError?.message
+    );
+  }
+
+  const userClient = createClient(
     publicSupabaseConfig.url,
     publicSupabaseConfig.anonKey,
     {
@@ -237,25 +267,64 @@ export async function POST(request: Request) {
     }
   );
 
-  const { data: userData, error: userError } =
-    await supabase.auth.getUser(accessToken);
+  let organization: OrganizationRow | null = null;
 
-  if (userError || !userData.user) {
-    return jsonError(401, "Sessao do DASHMARKET invalida ou expirada.");
-  }
+  if (serviceRoleKey) {
+    const serviceClient = createClient(publicSupabaseConfig.url, serviceRoleKey, {
+      auth: { persistSession: false }
+    });
 
-  const { data: organization, error: organizationError } = await supabase
-    .from("organizations")
-    .select("id, name")
-    .eq("id", organizationId)
-    .maybeSingle();
+    const { data: member, error: memberError } = await serviceClient
+      .from("organization_members")
+      .select("organization_id, user_id")
+      .eq("organization_id", organizationId)
+      .eq("user_id", userData.user.id)
+      .maybeSingle();
 
-  if (organizationError) {
-    return jsonError(
-      500,
-      "Nao foi possivel validar a empresa.",
-      organizationError.message
-    );
+    if (memberError) {
+      return jsonError(
+        500,
+        "Nao foi possivel validar o acesso a empresa.",
+        memberError.message
+      );
+    }
+
+    if (!(member as OrganizationMemberRow | null)) {
+      return jsonError(403, "Usuario sem acesso a esta empresa.");
+    }
+
+    const { data: organizationData, error: organizationError } =
+      await serviceClient
+        .from("organizations")
+        .select("id, name")
+        .eq("id", organizationId)
+        .maybeSingle();
+
+    if (organizationError) {
+      return jsonError(
+        500,
+        "Nao foi possivel validar a empresa.",
+        organizationError.message
+      );
+    }
+
+    organization = organizationData as OrganizationRow | null;
+  } else {
+    const { data: organizationData, error: organizationError } = await userClient
+      .from("organizations")
+      .select("id, name")
+      .eq("id", organizationId)
+      .maybeSingle();
+
+    if (organizationError) {
+      return jsonError(
+        500,
+        "Nao foi possivel validar a empresa.",
+        organizationError.message
+      );
+    }
+
+    organization = organizationData as OrganizationRow | null;
   }
 
   if (!organization) {
