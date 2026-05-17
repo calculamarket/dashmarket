@@ -1,3 +1,6 @@
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -158,6 +161,37 @@ const periodShape = {
 const organizationShape = {
   organizationId: z.string().optional()
 };
+
+function loadProjectEnv() {
+  const currentDir = dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    resolve(currentDir, "../../.env.local"),
+    resolve(currentDir, "../.env.local"),
+    resolve(process.cwd(), "../.env.local"),
+    resolve(process.cwd(), ".env.local")
+  ];
+  const envPath = candidates.find((candidate) => existsSync(candidate));
+
+  if (!envPath) return;
+
+  const content = readFileSync(envPath, "utf8");
+
+  for (const rawLine of content.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+
+    const separator = line.indexOf("=");
+    if (separator <= 0) continue;
+
+    const key = line.slice(0, separator).trim();
+    const rawValue = line.slice(separator + 1).trim();
+    const value = rawValue.replace(/^["']|["']$/g, "");
+
+    if (!process.env[key]) {
+      process.env[key] = value;
+    }
+  }
+}
 
 function envValue(keys: string[]) {
   for (const key of keys) {
@@ -985,6 +1019,8 @@ async function auditOrders(args: { orderIds: string[]; organizationId?: string }
     rows
   };
 }
+
+loadProjectEnv();
 
 const server = new McpServer(
   {

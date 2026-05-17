@@ -15,7 +15,8 @@ campanhas, pedidos ou qualquer configuracao da conta Mercado Livre.
 
 ## Variaveis
 
-Use as mesmas chaves do DASHMARKET:
+Por padrao, o MCP tenta ler o `.env.local` da raiz do projeto DASHMARKET.
+Se voce rodar o MCP fora dessa pasta, configure as variaveis abaixo no cliente MCP:
 
 ```env
 SUPABASE_URL=
