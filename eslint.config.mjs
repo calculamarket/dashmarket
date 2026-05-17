@@ -13,6 +13,7 @@ const eslintConfig = [
   {
     ignores: [
       ".next/**",
+      "mcp/**",
       "node_modules/**",
       "supabase/functions/**",
       "next-env.d.ts",
