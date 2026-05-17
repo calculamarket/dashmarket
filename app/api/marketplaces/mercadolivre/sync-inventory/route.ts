@@ -489,6 +489,7 @@ export async function POST(request: Request) {
           ? await fetchUserProductStock(source.userProductId, accessToken)
           : null;
         const hasFullStock = Boolean(fulfillmentStock);
+        let hasFullLocationStock = false;
 
         if (fulfillmentStock) {
           snapshots.push({
@@ -510,7 +511,9 @@ export async function POST(request: Request) {
 
         for (const location of userProductStock?.locations ?? []) {
           const channel = channelFromLocationType(location.type);
-          if (channel === "full" && hasFullStock) continue;
+          if (channel !== "full" || hasFullStock) continue;
+
+          hasFullLocationStock = true;
 
           snapshots.push({
             organization_id: organizationId,
@@ -532,7 +535,8 @@ export async function POST(request: Request) {
 
         if (
           !fulfillmentStock &&
-          !userProductStock?.locations?.length &&
+          !hasFullLocationStock &&
+          source.logisticType === "full" &&
           source.fallbackAvailableQuantity !== null
         ) {
           snapshots.push({

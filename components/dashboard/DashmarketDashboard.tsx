@@ -1272,6 +1272,11 @@ function channelLabel(channel: string) {
   return labels[channel] ?? channel;
 }
 
+function isFullInventoryChannel(channel: string) {
+  const normalized = channel.trim().toLowerCase();
+  return normalized === "full" || normalized === "fulfillment";
+}
+
 function inventoryStatus(available: number): InventoryDisplayRow["status"] {
   if (available <= 5) return "Critico";
   if (available <= 20) return "Atencao";
@@ -1706,7 +1711,10 @@ export function DashmarketDashboard() {
   const displayInventoryRows =
     shouldUseDemoData
       ? inventoryRows
-      : realInventory.filter((row) => activeProductSkus.has(row.sku));
+      : realInventory.filter(
+          (row) =>
+            activeProductSkus.has(row.sku) && isFullInventoryChannel(row.channel)
+        );
   const displayPromotionRows =
     shouldUseDemoData ? promotionRows : realPromotions;
   const productOptions = useMemo(
@@ -2932,6 +2940,7 @@ export function DashmarketDashboard() {
         "seller_sku, fulfillment_channel, available_quantity, reserved_quantity, not_available_quantity, captured_at"
       )
       .eq("organization_id", organizationId)
+      .in("fulfillment_channel", ["full", "fulfillment"])
       .order("captured_at", { ascending: false })
       .limit(10000);
 
@@ -2942,6 +2951,8 @@ export function DashmarketDashboard() {
     for (const row of (data ?? []) as InventorySnapshotRow[]) {
       const sku = row.seller_sku ?? "SKU sem codigo";
       const channel = row.fulfillment_channel;
+      if (!isFullInventoryChannel(channel)) continue;
+
       const key = `${sku}:${channel}`;
 
       if (latestBySkuAndChannel.has(key)) continue;
@@ -4836,7 +4847,7 @@ export function DashmarketDashboard() {
       const summary = payload as SyncInventorySummary;
       setInventorySyncSummary(summary);
       setDataMessage(
-        `Estoque sincronizado: ${summary.snapshots} snapshots, ${summary.fullSnapshots} do Full.`
+        `Estoque Full sincronizado: ${summary.fullSnapshots} snapshots do Full.`
       );
       await loadCostCenter(organization.id);
       await loadInventory(organization.id);
@@ -8712,11 +8723,11 @@ export function DashmarketDashboard() {
               <section className="rounded-lg border border-black/10 bg-white shadow-sm">
                 <div className="flex flex-col gap-3 border-b border-black/10 p-4 sm:flex-row sm:items-center sm:justify-between">
                   <div>
-                    <h2 className="text-lg font-bold">Estoque por canal de envio</h2>
+                    <h2 className="text-lg font-bold">Estoque Full</h2>
                     <p className="text-sm text-black/60">
                       {realInventory.length > 0
-                        ? "Ultimo snapshot salvo no Supabase com valor liquido por SKU."
-                        : "Pronto para receber snapshots do Full e demais modalidades."}
+                        ? "Ultimo snapshot Full salvo no Supabase com valor liquido por SKU."
+                        : "Pronto para receber snapshots do Full."}
                     </p>
                   </div>
                   {mercadoLivreAccount && (
@@ -8745,7 +8756,7 @@ export function DashmarketDashboard() {
                       {formatNumber.format(inventoryValuationTotals.skuCount)}
                     </p>
                     <p className="text-xs text-black/50">
-                      Full: {formatNumber.format(inventoryValuationTotals.fullSkuCount)}
+                      Somente Full
                     </p>
                   </div>
                   <div className="rounded-lg border border-black/10 bg-paper p-3">
@@ -8770,7 +8781,7 @@ export function DashmarketDashboard() {
                       )}
                     </p>
                     <p className="text-xs text-black/50">
-                      Total geral:{" "}
+                      Somente Full:{" "}
                       {formatCurrency.format(inventoryValuationTotals.investedValue)}
                     </p>
                   </div>
