@@ -42,6 +42,12 @@ npm run build
 npm run start
 ```
 
+## ChatGPT
+
+O ChatGPT precisa de um MCP remoto em HTTPS. No DASHMARKET, esse endpoint fica
+em `/mcp/SEU_SEGREDO` quando publicado na Vercel. Veja o passo a passo em
+`docs/chatgpt-mcp.md`.
+
 Configuracao exemplo para um cliente MCP local:
 
 ```json

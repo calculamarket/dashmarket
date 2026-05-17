@@ -162,7 +162,7 @@ const organizationShape = {
   organizationId: z.string().optional()
 };
 
-function loadProjectEnv() {
+export function loadProjectEnv() {
   const currentDir = dirname(fileURLToPath(import.meta.url));
   const candidates = [
     resolve(currentDir, "../../.env.local"),
@@ -1020,87 +1020,106 @@ async function auditOrders(args: { orderIds: string[]; organizationId?: string }
   };
 }
 
-loadProjectEnv();
-
-const server = new McpServer(
-  {
+export function createDashmarketMcpServer() {
+  const server = new McpServer({
     name: "dashmarket",
     version: "0.1.0"
-  }
-);
+  });
 
-server.registerTool(
-  "dashmarket_get_sales_summary",
-  {
-    title: "Resumo de vendas DASHMARKET",
-    description: "Consulta faturamento, custos, ADS e margem de contribuicao.",
-    inputSchema: periodShape,
-    annotations: {
-      readOnlyHint: true
-    }
-  },
-  async (args) => result(await getSalesSummary(args))
-);
-
-server.registerTool(
-  "dashmarket_get_full_inventory",
-  {
-    title: "Estoque Full DASHMARKET",
-    description: "Consulta somente estoque Full, sem deposito proprio.",
-    inputSchema: organizationShape,
-    annotations: {
-      readOnlyHint: true
-    }
-  },
-  async (args) => result(await getFullInventory(args))
-);
-
-server.registerTool(
-  "dashmarket_get_ads_summary",
-  {
-    title: "Resumo de ADS DASHMARKET",
-    description: "Consulta investimento, receita atribuida, ACOS e dados de ADS.",
-    inputSchema: periodShape,
-    annotations: {
-      readOnlyHint: true
-    }
-  },
-  async (args) => result(await getAdsSummary(args))
-);
-
-server.registerTool(
-  "dashmarket_get_sku_margin",
-  {
-    title: "Margem por SKU DASHMARKET",
-    description: "Consulta margem de contribuicao por SKU.",
-    inputSchema: {
-      ...periodShape,
-      sku: z.string().optional(),
-      limit: z.number().int().min(1).max(100).optional()
+  server.registerTool(
+    "dashmarket_get_sales_summary",
+    {
+      title: "Resumo de vendas DASHMARKET",
+      description: "Consulta faturamento, custos, ADS e margem de contribuicao.",
+      inputSchema: periodShape,
+      annotations: {
+        readOnlyHint: true
+      }
     },
-    annotations: {
-      readOnlyHint: true
-    }
-  },
-  async (args) => result(await getSkuMargin(args))
-);
+    async (args) => result(await getSalesSummary(args))
+  );
 
-server.registerTool(
-  "dashmarket_audit_orders",
-  {
-    title: "Auditoria de vendas Mercado Livre",
-    description:
-      "Compara vendas locais com a API do Mercado Livre sem alterar a conta.",
-    inputSchema: {
-      organizationId: z.string().optional(),
-      orderIds: z.array(z.string()).min(1).max(20)
+  server.registerTool(
+    "dashmarket_get_full_inventory",
+    {
+      title: "Estoque Full DASHMARKET",
+      description: "Consulta somente estoque Full, sem deposito proprio.",
+      inputSchema: organizationShape,
+      annotations: {
+        readOnlyHint: true
+      }
     },
-    annotations: {
-      readOnlyHint: true
-    }
-  },
-  async (args) => result(await auditOrders(args))
-);
+    async (args) => result(await getFullInventory(args))
+  );
 
-const transport = new StdioServerTransport();
-await server.connect(transport);
+  server.registerTool(
+    "dashmarket_get_ads_summary",
+    {
+      title: "Resumo de ADS DASHMARKET",
+      description: "Consulta investimento, receita atribuida, ACOS e dados de ADS.",
+      inputSchema: periodShape,
+      annotations: {
+        readOnlyHint: true
+      }
+    },
+    async (args) => result(await getAdsSummary(args))
+  );
+
+  server.registerTool(
+    "dashmarket_get_sku_margin",
+    {
+      title: "Margem por SKU DASHMARKET",
+      description: "Consulta margem de contribuicao por SKU.",
+      inputSchema: {
+        ...periodShape,
+        sku: z.string().optional(),
+        limit: z.number().int().min(1).max(100).optional()
+      },
+      annotations: {
+        readOnlyHint: true
+      }
+    },
+    async (args) => result(await getSkuMargin(args))
+  );
+
+  server.registerTool(
+    "dashmarket_audit_orders",
+    {
+      title: "Auditoria de vendas Mercado Livre",
+      description:
+        "Compara vendas locais com a API do Mercado Livre sem alterar a conta.",
+      inputSchema: {
+        organizationId: z.string().optional(),
+        orderIds: z.array(z.string()).min(1).max(20)
+      },
+      annotations: {
+        readOnlyHint: true
+      }
+    },
+    async (args) => result(await auditOrders(args))
+  );
+
+  return server;
+}
+
+export async function startStdioDashmarketMcpServer() {
+  loadProjectEnv();
+
+  const server = createDashmarketMcpServer();
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+}
+
+function isMainModule() {
+  const entryPoint = process.argv[1];
+  if (!entryPoint) return false;
+
+  return resolve(fileURLToPath(import.meta.url)) === resolve(entryPoint);
+}
+
+if (isMainModule()) {
+  startStdioDashmarketMcpServer().catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
+}
