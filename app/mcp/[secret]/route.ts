@@ -108,6 +108,28 @@ export async function OPTIONS() {
 }
 
 export async function GET(request: Request, context: RouteContext) {
+  const accept = request.headers.get("accept") ?? "";
+
+  if (!accept.includes("text/event-stream")) {
+    const authorization = await authorize(context);
+    if (authorization.error) return authorization.error;
+
+    return jsonResponse(200, {
+      name: "dashmarket",
+      status: "online",
+      transport: "mcp-streamable-http",
+      message:
+        "Endpoint MCP do DASHMARKET ativo. Configure esta URL em um cliente MCP como o ChatGPT; abrir no navegador serve apenas como teste de disponibilidade.",
+      tools: [
+        "dashmarket_get_sales_summary",
+        "dashmarket_get_full_inventory",
+        "dashmarket_get_ads_summary",
+        "dashmarket_get_sku_margin",
+        "dashmarket_audit_orders"
+      ]
+    });
+  }
+
   return handleMcpRequest(request, context);
 }
 
