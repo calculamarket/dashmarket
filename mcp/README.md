@@ -7,6 +7,8 @@ campanhas, pedidos ou qualquer configuracao da conta Mercado Livre.
 
 ## Ferramentas
 
+- `search`: pesquisa respostas do DASHMARKET para compatibilidade com ChatGPT.
+- `fetch`: abre o resultado retornado por `search` para compatibilidade com ChatGPT.
 - `dashmarket_get_sales_summary`: resumo de vendas, custos, ADS e margem.
 - `dashmarket_get_full_inventory`: estoque Full, quantidade e valor estimado.
 - `dashmarket_get_ads_summary`: investimento, receita atribuida, TACOS e ACOS.

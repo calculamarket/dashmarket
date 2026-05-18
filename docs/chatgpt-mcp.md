@@ -29,11 +29,17 @@ ferramentas continuam somente leitura.
 
 ## Ferramentas disponiveis
 
+- `search`
+- `fetch`
 - `dashmarket_get_sales_summary`
 - `dashmarket_get_full_inventory`
 - `dashmarket_get_ads_summary`
 - `dashmarket_get_sku_margin`
 - `dashmarket_audit_orders`
+
+O ChatGPT usa `search` e `fetch` para descobrir e carregar conteudo do
+conector. As demais ferramentas continuam disponiveis para clientes MCP que
+expoem chamadas diretas.
 
 ## Conexao no ChatGPT
 

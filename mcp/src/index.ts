@@ -162,6 +162,24 @@ const organizationShape = {
   organizationId: z.string().optional()
 };
 
+const searchOutputSchema = {
+  results: z.array(
+    z.object({
+      id: z.string(),
+      title: z.string(),
+      url: z.string().url()
+    })
+  )
+};
+
+const fetchOutputSchema = {
+  id: z.string(),
+  title: z.string(),
+  text: z.string(),
+  url: z.string().url(),
+  metadata: z.record(z.string(), z.string()).optional()
+};
+
 export function loadProjectEnv() {
   const currentDir = dirname(fileURLToPath(import.meta.url));
   const candidates = [
@@ -245,6 +263,53 @@ function addDays(dateValue: string, days: number) {
 
 function monthStart(dateValue: string) {
   return `${dateValue.slice(0, 7)}-01`;
+}
+
+function appUrl(path = "") {
+  const configuredUrl =
+    envValue([
+      "DASHMARKET_PUBLIC_URL",
+      "NEXT_PUBLIC_APP_URL",
+      "VERCEL_PROJECT_PRODUCTION_URL"
+    ]) ?? "https://dashmarketml.vercel.app";
+  const baseUrl = configuredUrl.startsWith("http")
+    ? configuredUrl
+    : `https://${configuredUrl}`;
+
+  return `${baseUrl.replace(/\/$/, "")}${path}`;
+}
+
+function resultUrl(id: string) {
+  return `${appUrl("/")}#mcp-${encodeURIComponent(id)}`;
+}
+
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat("pt-BR", {
+    currency: "BRL",
+    style: "currency"
+  }).format(value);
+}
+
+function formatNumber(value: number) {
+  return new Intl.NumberFormat("pt-BR", {
+    maximumFractionDigits: 2
+  }).format(value);
+}
+
+function formatPercent(value: number) {
+  return new Intl.NumberFormat("pt-BR", {
+    maximumFractionDigits: 2,
+    style: "percent"
+  }).format(value);
+}
+
+function periodTitle(period: PeriodArgs["period"]) {
+  if (period === "today") return "hoje";
+  if (period === "yesterday") return "ontem";
+  if (period === "last_7_days") return "ultimos 7 dias";
+  if (period === "last_30_days") return "ultimos 30 dias";
+
+  return "este mes";
 }
 
 function resolvePeriod(args: PeriodArgs): PeriodRange {
@@ -1020,11 +1085,274 @@ async function auditOrders(args: { orderIds: string[]; organizationId?: string }
   };
 }
 
+function resolveSearchPeriod(query: string): PeriodArgs["period"] {
+  const normalized = normalizeText(query);
+
+  if (normalized.includes("ontem")) return "yesterday";
+  if (normalized.includes("hoje")) return "today";
+  if (normalized.includes("7 dias") || normalized.includes("semana")) {
+    return "last_7_days";
+  }
+  if (normalized.includes("30 dias") || normalized.includes("mes passado")) {
+    return "last_30_days";
+  }
+
+  return "this_month";
+}
+
+function searchResult(id: string, title: string) {
+  return {
+    id,
+    title,
+    url: resultUrl(id)
+  };
+}
+
+async function searchDashmarket(args: { query: string }) {
+  const normalized = normalizeText(args.query);
+  const period = resolveSearchPeriod(args.query);
+  const results = [];
+
+  if (
+    normalized.includes("estoque") ||
+    normalized.includes("full") ||
+    normalized.includes("inventario")
+  ) {
+    results.push(
+      searchResult("inventory:full", "Estoque Full atual do DASHMARKET")
+    );
+  }
+
+  if (
+    normalized.includes("ads") ||
+    normalized.includes("publicidade") ||
+    normalized.includes("tacos") ||
+    normalized.includes("acos")
+  ) {
+    results.push(
+      searchResult(
+        `ads:${period}`,
+        `Publicidade e ADS do DASHMARKET - ${periodTitle(period)}`
+      )
+    );
+  }
+
+  if (
+    normalized.includes("sku") ||
+    normalized.includes("produto") ||
+    normalized.includes("margem")
+  ) {
+    results.push(
+      searchResult(
+        `sku_margin:${period}`,
+        `Margem por SKU do DASHMARKET - ${periodTitle(period)}`
+      )
+    );
+  }
+
+  if (
+    results.length === 0 ||
+    normalized.includes("venda") ||
+    normalized.includes("vendi") ||
+    normalized.includes("lucro") ||
+    normalized.includes("faturamento") ||
+    normalized.includes("resultado")
+  ) {
+    results.unshift(
+      searchResult(
+        `sales:${period}`,
+        `Resumo de vendas e margem do DASHMARKET - ${periodTitle(period)}`
+      )
+    );
+  }
+
+  return {
+    results: results.slice(0, 5)
+  };
+}
+
+function salesSummaryText(data: Awaited<ReturnType<typeof getSalesSummary>>) {
+  const totals = data.totals;
+
+  return [
+    `Periodo: ${data.period.dateFrom} a ${data.period.dateTo}.`,
+    `Faturamento bruto: ${formatCurrency(totals.grossRevenue)}.`,
+    `Receita liquida: ${formatCurrency(totals.netRevenue)}.`,
+    `Pedidos: ${formatNumber(totals.orders)}.`,
+    `Unidades: ${formatNumber(totals.units)}.`,
+    `Taxas do marketplace: ${formatCurrency(totals.marketplaceFees)}.`,
+    `Frete: ${formatCurrency(totals.shippingCosts)}.`,
+    `Impostos: ${formatCurrency(totals.taxes)}.`,
+    `Custos de SKU: ${formatCurrency(totals.skuCosts)}.`,
+    `Investimento em ADS: ${formatCurrency(totals.advertisingCosts)}.`,
+    `Margem de contribuicao: ${formatCurrency(totals.contributionMargin)} (${formatPercent(
+      totals.contributionMarginRate
+    )}).`,
+    `TACOS: ${formatPercent(totals.tacos)}.`,
+    "",
+    "Principais SKUs:",
+    ...data.topSkus.map(
+      (row, index) =>
+        `${index + 1}. ${row.sku} - ${row.title}: ${formatCurrency(
+          row.grossRevenue
+        )} em vendas, margem ${formatCurrency(
+          row.contributionMargin
+        )} (${formatPercent(row.contributionMarginRate)}), TACOS ${formatPercent(
+          row.tacos
+        )}.`
+    )
+  ].join("\n");
+}
+
+function inventoryText(data: Awaited<ReturnType<typeof getFullInventory>>) {
+  return [
+    "Estoque Full atual do DASHMARKET.",
+    `SKUs: ${formatNumber(data.totals.skus)}.`,
+    `Disponivel: ${formatNumber(data.totals.available)}.`,
+    `Reservado: ${formatNumber(data.totals.reserved)}.`,
+    `Indisponivel: ${formatNumber(data.totals.notAvailable)}.`,
+    `Quantidade total: ${formatNumber(data.totals.totalQuantity)}.`,
+    `Valor investido estimado: ${formatCurrency(data.totals.investedValue)}.`,
+    "",
+    "Maiores posicoes de estoque:",
+    ...data.rows.slice(0, 20).map(
+      (row, index) =>
+        `${index + 1}. ${row.sku} - ${row.title}: ${formatNumber(
+          row.totalQuantity
+        )} unidades, valor estimado ${formatCurrency(row.investedValue)}.`
+    )
+  ].join("\n");
+}
+
+function adsText(data: Awaited<ReturnType<typeof getAdsSummary>>) {
+  return [
+    `ADS no periodo ${data.period.dateFrom} a ${data.period.dateTo}.`,
+    `Investimento: ${formatCurrency(data.totals.adSpend)}.`,
+    `Receita atribuida: ${formatCurrency(data.totals.attributedRevenue)}.`,
+    `Pedidos atribuidos: ${formatNumber(data.totals.attributedOrders)}.`,
+    `Impressoes: ${formatNumber(data.totals.impressions)}.`,
+    `Cliques: ${formatNumber(data.totals.clicks)}.`,
+    `CTR: ${formatPercent(data.totals.ctr)}.`,
+    `ACOS: ${formatPercent(data.totals.acos)}.`,
+    "",
+    "SKUs/campanhas com maior investimento:",
+    ...data.rows.slice(0, 20).map(
+      (row, index) =>
+        `${index + 1}. ${row.sku} - ${row.title}: investimento ${formatCurrency(
+          row.adSpend
+        )}, receita atribuida ${formatCurrency(
+          row.attributedRevenue
+        )}, ACOS ${formatPercent(row.acos)}.`
+    )
+  ].join("\n");
+}
+
+function skuMarginText(data: Awaited<ReturnType<typeof getSkuMargin>>) {
+  return [
+    `Margem por SKU no periodo ${data.period.dateFrom} a ${data.period.dateTo}.`,
+    ...data.rows.slice(0, 30).map(
+      (row, index) =>
+        `${index + 1}. ${row.sku} - ${row.title}: vendas ${formatCurrency(
+          row.grossRevenue
+        )}, unidades ${formatNumber(row.units)}, margem ${formatCurrency(
+          row.contributionMargin
+        )} (${formatPercent(row.contributionMarginRate)}), ADS ${formatCurrency(
+          row.advertisingCosts
+        )}, TACOS ${formatPercent(row.tacos)}.`
+    )
+  ].join("\n");
+}
+
+async function fetchDashmarket(args: { id: string }) {
+  const [kind, rawPeriod] = args.id.split(":");
+  const period =
+    rawPeriod === "today" ||
+    rawPeriod === "yesterday" ||
+    rawPeriod === "last_7_days" ||
+    rawPeriod === "last_30_days" ||
+    rawPeriod === "this_month"
+      ? rawPeriod
+      : "this_month";
+  const url = resultUrl(args.id);
+
+  if (kind === "inventory") {
+    const data = await getFullInventory({});
+    return {
+      id: args.id,
+      metadata: { kind },
+      text: inventoryText(data),
+      title: "Estoque Full atual do DASHMARKET",
+      url
+    };
+  }
+
+  if (kind === "ads") {
+    const data = await getAdsSummary({ period });
+    return {
+      id: args.id,
+      metadata: { kind, period },
+      text: adsText(data),
+      title: `Publicidade e ADS do DASHMARKET - ${periodTitle(period)}`,
+      url
+    };
+  }
+
+  if (kind === "sku_margin") {
+    const data = await getSkuMargin({ limit: 30, period });
+    return {
+      id: args.id,
+      metadata: { kind, period },
+      text: skuMarginText(data),
+      title: `Margem por SKU do DASHMARKET - ${periodTitle(period)}`,
+      url
+    };
+  }
+
+  const data = await getSalesSummary({ period });
+  return {
+    id: args.id,
+    metadata: { kind: "sales", period },
+    text: salesSummaryText(data),
+    title: `Resumo de vendas e margem do DASHMARKET - ${periodTitle(period)}`,
+    url
+  };
+}
+
 export function createDashmarketMcpServer() {
   const server = new McpServer({
     name: "dashmarket",
     version: "0.1.0"
   });
+
+  server.registerTool(
+    "search",
+    {
+      title: "Pesquisar DASHMARKET",
+      description:
+        "Pesquisa respostas do DASHMARKET sobre vendas, lucro, margem, ADS, TACOS, estoque Full e SKUs.",
+      inputSchema: { query: z.string() },
+      outputSchema: searchOutputSchema,
+      annotations: {
+        readOnlyHint: true
+      }
+    },
+    async (args) => result(await searchDashmarket(args))
+  );
+
+  server.registerTool(
+    "fetch",
+    {
+      title: "Consultar resultado DASHMARKET",
+      description:
+        "Busca o conteudo completo de um resultado encontrado no DASHMARKET.",
+      inputSchema: { id: z.string() },
+      outputSchema: fetchOutputSchema,
+      annotations: {
+        readOnlyHint: true
+      }
+    },
+    async (args) => result(await fetchDashmarket(args))
+  );
 
   server.registerTool(
     "dashmarket_get_sales_summary",
