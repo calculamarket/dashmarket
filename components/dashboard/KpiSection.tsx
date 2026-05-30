@@ -75,14 +75,15 @@ export function KpiCard({
 
 interface KpiSectionProps {
   children: React.ReactNode;
+  cols?: 4 | 5;
 }
 
-export function KpiSection({ children }: KpiSectionProps) {
-  return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-      {children}
-    </div>
-  );
+export function KpiSection({ children, cols = 4 }: KpiSectionProps) {
+  const colClass =
+    cols === 5
+      ? "grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5"
+      : "grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4";
+  return <div className={colClass}>{children}</div>;
 }
 
 export function SkeletonKpiCard() {

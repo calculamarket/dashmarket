@@ -6068,7 +6068,7 @@ export function DashmarketDashboard() {
               </div>
             </header>
 
-            <KpiSection>
+            <KpiSection cols={5}>
               <KpiCard
                 detail={`${formatNumber.format(salesDetailTotals.quantity)} unidades vendidas`}
                 icon={CircleDollarSign}
@@ -6096,7 +6096,81 @@ export function DashmarketDashboard() {
                 tone="berry"
                 value={formatCurrency.format(totals.advertisingCosts)}
               />
+              <KpiCard
+                detail={`${formatNumber.format(inventoryValuationTotals.fullSkuCount)} SKUs no Full`}
+                icon={Boxes}
+                title="Valor Estoque Full"
+                tone={inventoryValuationTotals.fullInvestedValue < 0 ? "berry" : "moss"}
+                trend={inventoryValuationTotals.fullInvestedValue < 0 ? "down" : "up"}
+                value={formatCurrency.format(inventoryValuationTotals.fullInvestedValue)}
+              />
             </KpiSection>
+
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="rounded-xl border border-slate-200/60 bg-white p-5 shadow-card">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Pedidos aprovados</p>
+                    <p className="font-data mt-1 text-2xl font-bold tracking-tight text-ink">{formatNumber.format(salesDetailTotals.orders)}</p>
+                  </div>
+                  <div className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-slate-50 ring-1 ring-inset ring-slate-100 text-slate-600">
+                    <ClipboardList aria-hidden className="h-6 w-6" />
+                  </div>
+                </div>
+                <p className="mt-4 text-xs font-medium text-slate-500/80">
+                  {salesDetailTotals.orders > 0
+                    ? `Ticket médio ${formatCurrency.format(salesDetailTotals.grossAmount / salesDetailTotals.orders)}`
+                    : "Sem pedidos no período"}
+                </p>
+              </div>
+
+              <div className="rounded-xl border border-slate-200/60 bg-white p-5 shadow-card">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Taxa de Marketplace</p>
+                    <p className="font-data mt-1 text-2xl font-bold tracking-tight text-ink">{formatCurrency.format(salesDetailTotals.marketplaceFee)}</p>
+                  </div>
+                  <div className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-rose-50 ring-1 ring-inset ring-rose-100 text-rose-600">
+                    <Tags aria-hidden className="h-6 w-6" />
+                  </div>
+                </div>
+                <p className="mt-4 text-xs font-medium text-slate-500/80">
+                  {salesDetailTotals.grossAmount > 0
+                    ? `${formatPercent(salesDetailTotals.marketplaceFee / salesDetailTotals.grossAmount)} da receita bruta`
+                    : "Comissões e taxas do ML"}
+                </p>
+              </div>
+
+              <div className="rounded-xl border border-slate-200/60 bg-white p-5 shadow-card">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Frete vendedor</p>
+                    <p className="font-data mt-1 text-2xl font-bold tracking-tight text-ink">{formatCurrency.format(salesDetailTotals.shippingSeller)}</p>
+                  </div>
+                  <div className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-amber-50 ring-1 ring-inset ring-amber-100 text-amber-600">
+                    <PackageCheck aria-hidden className="h-6 w-6" />
+                  </div>
+                </div>
+                <p className="mt-4 text-xs font-medium text-slate-500/80">
+                  Frete comprador: {formatCurrency.format(salesDetailTotals.shippingBuyer)}
+                </p>
+              </div>
+
+              <div className="rounded-xl border border-slate-200/60 bg-white p-5 shadow-card">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Estoque total (todos canais)</p>
+                    <p className="font-data mt-1 text-2xl font-bold tracking-tight text-ink">{formatNumber.format(inventoryValuationTotals.totalQuantity)} un.</p>
+                  </div>
+                  <div className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-teal-50 ring-1 ring-inset ring-teal-100 text-teal-600">
+                    <PackagePlus aria-hidden className="h-6 w-6" />
+                  </div>
+                </div>
+                <p className="mt-4 text-xs font-medium text-slate-500/80">
+                  {formatNumber.format(inventoryValuationTotals.skuCount)} SKUs · Valor líquido total {formatCurrency.format(inventoryValuationTotals.investedValue)}
+                </p>
+              </div>
+            </div>
 
           {(dataMessage || supabaseStatus === "connected") && (
             <section className="mt-4 rounded-lg border border-black/10 bg-white px-4 py-3 text-sm shadow-sm">
