@@ -193,7 +193,8 @@ function isDateOnly(value: unknown): value is string {
 }
 
 function dateOnly(value: Date) {
-  return value.toISOString().slice(0, 10);
+  // BRT = UTC-3, sem horário de verão desde 2019
+  return new Date(value.getTime() - 3 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
 function daysBetween(fromDate: Date, toDate: Date) {

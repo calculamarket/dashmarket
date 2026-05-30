@@ -1113,6 +1113,7 @@ const formatNumber = new Intl.NumberFormat("pt-BR");
 
 const SALES_DETAIL_LIMIT = 50000;
 const SAO_PAULO_TIME_ZONE = "America/Sao_Paulo";
+const saoPauloIsoDate = new Intl.DateTimeFormat("sv", { timeZone: SAO_PAULO_TIME_ZONE });
 const saoPauloDateParts = new Intl.DateTimeFormat("pt-BR", {
   day: "2-digit",
   month: "2-digit",
@@ -1678,14 +1679,11 @@ function formatDateTimeInSaoPaulo(value: string) {
 }
 
 function dateOnly(value: Date) {
-  const localDate = new Date(value.getTime() - value.getTimezoneOffset() * 60000);
-  return localDate.toISOString().slice(0, 10);
+  return saoPauloIsoDate.format(value);
 }
 
 function daysAgo(days: number) {
-  const value = new Date();
-  value.setDate(value.getDate() - days);
-  return dateOnly(value);
+  return dateOnly(new Date(Date.now() - days * 24 * 60 * 60 * 1000));
 }
 
 function daysBackFromDate(dateValue: string) {
