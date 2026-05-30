@@ -10,6 +10,7 @@ import {
   Cable,
   CircleDollarSign,
   ClipboardList,
+  HelpCircle,
   Lightbulb,
   LineChart,
   LogOut,
@@ -21,7 +22,9 @@ import {
   RefreshCw,
   Save,
   Search,
+  ShieldAlert,
   ShieldCheck,
+  Star,
   Tags,
   Target,
   TrendingDown,
@@ -685,6 +688,84 @@ type AdAnalysisSyncSummary = {
   checkedListings: number;
   syncedAt: string;
   warnings?: string[];
+};
+
+// Pós-venda types
+type ReputationLevel = "1_red" | "2_orange" | "3_yellow" | "4_light_green" | "5_green";
+
+type SellerReputationResponse = {
+  accountName: string;
+  sellerId: string;
+  nickname: string;
+  levelId: ReputationLevel | null;
+  levelLabel: string;
+  powerSellerStatus: string | null;
+  metrics: {
+    sales: { period: string; completed: number };
+    claims: { period: string; rate: number; value: number };
+    delayed_handling_time: { period: string; rate: number; value: number };
+    cancellations: { period: string; rate: number; value: number };
+  } | null;
+  transactions: {
+    period: string;
+    total: number;
+    completed: number;
+    canceled: { total: number; rate: number };
+    ratings: { positive: number; negative: number; neutral: number };
+  } | null;
+  fetchedAt: string;
+};
+
+type QuestionsResponse = {
+  accountName: string;
+  total: number;
+  fetched: number;
+  oldestUnansweredAt: string | null;
+  topItems: Array<{ itemId: string; count: number; oldest: string }>;
+  questions: Array<{
+    id: number;
+    date_created: string;
+    item_id: string;
+    text: string;
+    status: string;
+  }>;
+  fetchedAt: string;
+};
+
+type ClaimItem = {
+  id: string;
+  orderId: string;
+  status: string;
+  stage: string;
+  stageLabel: string;
+  type: string;
+  reasonId: string | null;
+  reasonLabel: string | null;
+  dateCreated: string;
+  lastUpdated: string;
+  expirationDate: string | null;
+  hoursLeft: number | null;
+  isExpired: boolean;
+  isUrgent: boolean;
+  sellerActions: string[];
+  needsAction: boolean;
+  resolution: { reason: string | null; benefited: string | null } | null;
+};
+
+type ClaimsResponse = {
+  accountName: string;
+  status: string;
+  total: number;
+  fetched: number;
+  summary: {
+    expired: number;
+    urgent: number;
+    needsAction: number;
+    inMediation: number;
+    byStage: Record<string, number>;
+  };
+  claims: ClaimItem[];
+  fetchedAt: string;
 };
 
 type ProductOpportunitySearchResponse = {
@@ -1991,6 +2072,16 @@ export function DashmarketDashboard() {
     useState<AdAnalysisSyncSummary | null>(null);
   const [promotionsSyncSummary, setPromotionsSyncSummary] =
     useState<SyncPromotionsSummary | null>(null);
+
+  // Pós-venda states
+  const [isLoadingReputation, setIsLoadingReputation] = useState(false);
+  const [isLoadingQuestions, setIsLoadingQuestions] = useState(false);
+  const [isLoadingClaims, setIsLoadingClaims] = useState(false);
+  const [reputation, setReputation] = useState<SellerReputationResponse | null>(null);
+  const [questionsData, setQuestionsData] = useState<QuestionsResponse | null>(null);
+  const [claimsData, setClaimsData] = useState<ClaimsResponse | null>(null);
+  const [posVendaError, setPosVendaError] = useState<string | null>(null);
+
   const [marketplaceDiagnostics, setMarketplaceDiagnostics] =
     useState<MercadoLivreDiagnosticsResponse | null>(null);
   const [calculatorMode, setCalculatorMode] =
@@ -3733,6 +3824,44 @@ export function DashmarketDashboard() {
       })
     );
   }, [supabaseClient]);
+
+  const loadPosVenda = useCallback(async (organizationId: string, userToken: string) => {
+    setPosVendaError(null);
+    const headers = {
+      "content-type": "application/json",
+      authorization: `Bearer ${userToken}`
+    };
+    const body = JSON.stringify({ organizationId });
+
+    const [repRes, questRes, claimsRes] = await Promise.allSettled([
+      fetch("/api/marketplaces/mercadolivre/seller-reputation", {
+        method: "POST", headers, body
+      }),
+      fetch("/api/marketplaces/mercadolivre/questions", {
+        method: "POST", headers, body
+      }),
+      fetch("/api/marketplaces/mercadolivre/claims", {
+        method: "POST", headers, body
+      })
+    ]);
+
+    if (repRes.status === "fulfilled" && repRes.value.ok) {
+      setReputation((await repRes.value.json()) as SellerReputationResponse);
+    }
+    if (questRes.status === "fulfilled" && questRes.value.ok) {
+      setQuestionsData((await questRes.value.json()) as QuestionsResponse);
+    }
+    if (claimsRes.status === "fulfilled" && claimsRes.value.ok) {
+      setClaimsData((await claimsRes.value.json()) as ClaimsResponse);
+    }
+
+    const errors = [repRes, questRes, claimsRes]
+      .filter((r) => r.status === "rejected")
+      .map((r) => (r as PromiseRejectedResult).reason);
+    if (errors.length > 0) {
+      setPosVendaError("Alguns dados de pós-venda não puderam ser carregados.");
+    }
+  }, []);
 
   const loadCompanyFinance = useCallback(async (organizationId: string) => {
     if (!supabaseClient) return;
@@ -6035,7 +6164,29 @@ export function DashmarketDashboard() {
             </div>
           </div>
 
-          <Sidebar activeView={activeView} onViewChange={setActiveView} />
+          <Sidebar
+            activeView={activeView}
+            badges={{ pos_venda: claimsData ? (claimsData.summary.urgent + claimsData.summary.expired + (questionsData?.total ?? 0)) : undefined }}
+            onViewChange={async (view) => {
+              setActiveView(view);
+              if (view === "pos_venda" && organization && supabaseClient && !reputation && !questionsData && !claimsData) {
+                setIsLoadingReputation(true);
+                setIsLoadingQuestions(true);
+                setIsLoadingClaims(true);
+                try {
+                  const { data: sessionData } = await supabaseClient.auth.getSession();
+                  const accessToken = sessionData.session?.access_token;
+                  if (accessToken) {
+                    await loadPosVenda(organization.id, accessToken);
+                  }
+                } finally {
+                  setIsLoadingReputation(false);
+                  setIsLoadingQuestions(false);
+                  setIsLoadingClaims(false);
+                }
+              }
+            }}
+          />
         </div>
       </header>
 
@@ -6377,6 +6528,322 @@ export function DashmarketDashboard() {
 
           </div>
         )}
+
+          {activeView === "pos_venda" && (
+            <div className="space-y-8">
+              <header className="flex flex-col gap-2">
+                <p className="text-xs font-bold uppercase tracking-widest text-slate-400">Mercado Livre</p>
+                <h1 className="text-4xl font-extrabold tracking-tight text-slate-900">Pós-venda</h1>
+                <p className="text-sm font-medium text-slate-500">Reputação, perguntas sem resposta e reclamações em aberto.</p>
+              </header>
+
+              {posVendaError && (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-700">
+                  {posVendaError}
+                </div>
+              )}
+
+              {/* Reputação */}
+              <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+                <div className="flex items-center justify-between gap-4 border-b border-slate-200 bg-slate-50/50 px-5 py-4">
+                  <div className="flex items-center gap-3">
+                    <div className="grid h-10 w-10 place-items-center rounded-xl bg-amber-50 ring-1 ring-amber-100 text-amber-600">
+                      <Star aria-hidden className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <h2 className="text-base font-bold text-slate-900">Reputação da Conta</h2>
+                      <p className="text-xs font-medium text-slate-500">Nível, métricas e histórico de transações.</p>
+                    </div>
+                  </div>
+                  {isLoadingReputation && (
+                    <span className="text-xs font-semibold text-slate-400 animate-pulse">Carregando...</span>
+                  )}
+                </div>
+                {reputation ? (
+                  <div className="p-5 space-y-5">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-6">
+                      <div>
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Nível</p>
+                        <div className="mt-1 flex items-center gap-2">
+                          <span className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-bold ring-1 ${
+                            reputation.levelId === "5_green" ? "bg-emerald-50 text-emerald-700 ring-emerald-200" :
+                            reputation.levelId === "4_light_green" ? "bg-teal-50 text-teal-700 ring-teal-200" :
+                            reputation.levelId === "3_yellow" ? "bg-amber-50 text-amber-700 ring-amber-200" :
+                            reputation.levelId === "2_orange" ? "bg-orange-50 text-orange-700 ring-orange-200" :
+                            "bg-rose-50 text-rose-700 ring-rose-200"
+                          }`}>
+                            {reputation.levelLabel}
+                          </span>
+                          {reputation.powerSellerStatus && (
+                            <span className="inline-flex rounded-lg bg-slate-100 px-2 py-1 text-xs font-bold text-slate-600 ring-1 ring-slate-200">
+                              {reputation.powerSellerStatus}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="text-sm text-slate-500">
+                        <span className="font-semibold text-slate-700">{reputation.nickname}</span>
+                        {" · "}Vendedor ID {reputation.sellerId}
+                      </div>
+                    </div>
+
+                    {reputation.metrics && (
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                        {[
+                          {
+                            label: "Reclamações",
+                            rate: reputation.metrics.claims.rate,
+                            value: reputation.metrics.claims.value,
+                            threshold: 0.02
+                          },
+                          {
+                            label: "Atrasos no envio",
+                            rate: reputation.metrics.delayed_handling_time.rate,
+                            value: reputation.metrics.delayed_handling_time.value,
+                            threshold: 0.05
+                          },
+                          {
+                            label: "Cancelamentos",
+                            rate: reputation.metrics.cancellations.rate,
+                            value: reputation.metrics.cancellations.value,
+                            threshold: 0.03
+                          }
+                        ].map((metric) => (
+                          <div key={metric.label} className={`rounded-xl p-4 ring-1 ${metric.rate > metric.threshold ? "bg-rose-50 ring-rose-200" : "bg-slate-50 ring-slate-200"}`}>
+                            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">{metric.label}</p>
+                            <p className={`mt-1 text-xl font-bold ${metric.rate > metric.threshold ? "text-rose-600" : "text-slate-900"}`}>
+                              {(metric.rate * 100).toFixed(1)}%
+                            </p>
+                            <p className="text-xs text-slate-500">{metric.value} ocorrências</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {reputation.transactions && (
+                      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                        {[
+                          ["Total vendas", formatNumber.format(reputation.transactions.total)],
+                          ["Concluídas", formatNumber.format(reputation.transactions.completed)],
+                          ["Canceladas", formatNumber.format(reputation.transactions.canceled.total)],
+                          ["Avaliações +", formatNumber.format(reputation.transactions.ratings.positive)]
+                        ].map(([label, value]) => (
+                          <div key={label} className="rounded-xl bg-slate-50 p-4 ring-1 ring-slate-200">
+                            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">{label}</p>
+                            <p className="mt-1 text-xl font-bold text-slate-900">{value}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ) : !isLoadingReputation ? (
+                  <p className="px-5 py-8 text-center text-sm font-medium text-slate-500">
+                    Clique no botão "Pós-venda" para carregar os dados.
+                  </p>
+                ) : null}
+              </div>
+
+              {/* Perguntas sem resposta */}
+              <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+                <div className="flex items-center justify-between gap-4 border-b border-slate-200 bg-slate-50/50 px-5 py-4">
+                  <div className="flex items-center gap-3">
+                    <div className="grid h-10 w-10 place-items-center rounded-xl bg-sky-50 ring-1 ring-sky-100 text-sky-600">
+                      <HelpCircle aria-hidden className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <h2 className="text-base font-bold text-slate-900">Perguntas sem Resposta</h2>
+                      <p className="text-xs font-medium text-slate-500">
+                        {questionsData ? `${questionsData.total} pergunta${questionsData.total !== 1 ? "s" : ""} aguardando resposta` : "Perguntas dos compradores."}
+                      </p>
+                    </div>
+                  </div>
+                  {questionsData && questionsData.total > 0 && (
+                    <span className="flex h-8 min-w-8 items-center justify-center rounded-full bg-sky-600 px-2 text-xs font-bold text-white">
+                      {questionsData.total > 99 ? "99+" : questionsData.total}
+                    </span>
+                  )}
+                </div>
+                {questionsData ? (
+                  <div className="divide-y divide-slate-100">
+                    {questionsData.questions.length === 0 ? (
+                      <p className="px-5 py-8 text-center text-sm font-medium text-emerald-600">
+                        Nenhuma pergunta sem resposta.
+                      </p>
+                    ) : (
+                      questionsData.questions.slice(0, 20).map((q) => {
+                        const daysOld = Math.floor((Date.now() - new Date(q.date_created).getTime()) / 86400000);
+                        return (
+                          <div key={q.id} className="px-5 py-3">
+                            <div className="flex items-start justify-between gap-3">
+                              <p className="text-sm font-medium text-slate-800 line-clamp-2">{q.text}</p>
+                              <span className={`shrink-0 rounded-md px-2 py-0.5 text-[10px] font-bold ring-1 ${daysOld >= 3 ? "bg-rose-50 text-rose-600 ring-rose-200" : daysOld >= 1 ? "bg-amber-50 text-amber-600 ring-amber-200" : "bg-slate-50 text-slate-500 ring-slate-200"}`}>
+                                {daysOld === 0 ? "Hoje" : `${daysOld}d`}
+                              </span>
+                            </div>
+                            <p className="mt-0.5 text-xs font-medium text-slate-400">Anúncio {q.item_id}</p>
+                          </div>
+                        );
+                      })
+                    )}
+                    {questionsData.total > 20 && (
+                      <p className="px-5 py-3 text-center text-xs font-medium text-slate-400">
+                        + {questionsData.total - 20} perguntas adicionais — responda no painel do Mercado Livre.
+                      </p>
+                    )}
+                  </div>
+                ) : !isLoadingQuestions ? null : (
+                  <div className="px-5 py-8 text-center text-sm font-medium text-slate-400 animate-pulse">Carregando perguntas...</div>
+                )}
+              </div>
+
+              {/* Reclamações */}
+              <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+                <div className="flex items-center justify-between gap-4 border-b border-slate-200 bg-slate-50/50 px-5 py-4">
+                  <div className="flex items-center gap-3">
+                    <div className="grid h-10 w-10 place-items-center rounded-xl bg-rose-50 ring-1 ring-rose-100 text-rose-600">
+                      <ShieldAlert aria-hidden className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <h2 className="text-base font-bold text-slate-900">Reclamações & Mediações</h2>
+                      <p className="text-xs font-medium text-slate-500">
+                        {claimsData ? `${claimsData.total} em aberto` : "Reclamações abertas no Mercado Livre."}
+                      </p>
+                    </div>
+                  </div>
+                  {claimsData && (claimsData.summary.expired > 0 || claimsData.summary.urgent > 0) && (
+                    <div className="flex gap-2">
+                      {claimsData.summary.expired > 0 && (
+                        <span className="flex items-center gap-1 rounded-full bg-rose-600 px-2.5 py-1 text-[11px] font-bold text-white">
+                          <AlertTriangle className="h-3 w-3" /> {claimsData.summary.expired} vencidas
+                        </span>
+                      )}
+                      {claimsData.summary.urgent > 0 && (
+                        <span className="flex items-center gap-1 rounded-full bg-amber-500 px-2.5 py-1 text-[11px] font-bold text-white">
+                          {claimsData.summary.urgent} urgentes
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {claimsData ? (
+                  <div className="space-y-0">
+                    {claimsData.total > 0 && (
+                      <div className="grid grid-cols-2 gap-3 p-5 sm:grid-cols-4">
+                        {[
+                          { label: "Em mediação", value: claimsData.summary.inMediation, tone: "rose" },
+                          { label: "Precisam de ação", value: claimsData.summary.needsAction, tone: "amber" },
+                          { label: "Urgentes (< 24h)", value: claimsData.summary.urgent, tone: "amber" },
+                          { label: "Vencidas", value: claimsData.summary.expired, tone: "rose" }
+                        ].map(({ label, value, tone }) => (
+                          <div key={label} className={`rounded-xl p-4 ring-1 ${value > 0 ? (tone === "rose" ? "bg-rose-50 ring-rose-200" : "bg-amber-50 ring-amber-200") : "bg-slate-50 ring-slate-200"}`}>
+                            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">{label}</p>
+                            <p className={`mt-1 text-2xl font-bold ${value > 0 ? (tone === "rose" ? "text-rose-600" : "text-amber-600") : "text-slate-400"}`}>{value}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-sm border-collapse">
+                        <thead>
+                          <tr className="border-y border-slate-200 bg-slate-50/50 text-xs font-bold uppercase tracking-wider text-slate-500">
+                            <th className="px-5 py-3">Pedido</th>
+                            <th className="px-5 py-3">Fase</th>
+                            <th className="px-5 py-3">Motivo</th>
+                            <th className="px-5 py-3 text-right">Prazo</th>
+                            <th className="px-5 py-3">Ações disponíveis</th>
+                            <th className="px-5 py-3">Aberta em</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {claimsData.claims.length === 0 ? (
+                            <tr>
+                              <td className="px-5 py-10 text-center font-medium text-emerald-600" colSpan={6}>
+                                Nenhuma reclamação em aberto.
+                              </td>
+                            </tr>
+                          ) : (
+                            claimsData.claims.map((claim) => (
+                              <tr key={claim.id} className={`transition hover:bg-slate-50 ${claim.isExpired ? "bg-rose-50/40" : claim.isUrgent ? "bg-amber-50/40" : ""}`}>
+                                <td className="px-5 py-3">
+                                  <p className="font-bold text-slate-900 text-xs">{claim.orderId}</p>
+                                  <p className="text-[10px] text-slate-400">{claim.id}</p>
+                                </td>
+                                <td className="px-5 py-3">
+                                  <span className={`inline-flex rounded-md px-2 py-0.5 text-xs font-bold ring-1 ${
+                                    claim.stage === "MEDIATION" ? "bg-rose-50 text-rose-700 ring-rose-200" :
+                                    claim.stage === "DISPUTE" ? "bg-amber-50 text-amber-700 ring-amber-200" :
+                                    "bg-slate-50 text-slate-600 ring-slate-200"
+                                  }`}>
+                                    {claim.stageLabel}
+                                  </span>
+                                </td>
+                                <td className="px-5 py-3 text-xs font-medium text-slate-600">
+                                  {claim.reasonLabel ?? claim.reasonId ?? "—"}
+                                </td>
+                                <td className="px-5 py-3 text-right">
+                                  {claim.hoursLeft != null ? (
+                                    <span className={`text-xs font-bold ${claim.isExpired ? "text-rose-600" : claim.isUrgent ? "text-amber-600" : "text-slate-600"}`}>
+                                      {claim.isExpired ? "Vencida" : `${claim.hoursLeft}h`}
+                                    </span>
+                                  ) : "—"}
+                                </td>
+                                <td className="px-5 py-3">
+                                  {claim.sellerActions.length > 0 ? (
+                                    <div className="flex flex-wrap gap-1">
+                                      {claim.sellerActions.map((action) => (
+                                        <span key={action} className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600">
+                                          {action}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  ) : <span className="text-xs text-slate-400">—</span>}
+                                </td>
+                                <td className="px-5 py-3 text-xs text-slate-400">
+                                  {new Date(claim.dateCreated).toLocaleDateString("pt-BR")}
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ) : !isLoadingClaims ? null : (
+                  <div className="px-5 py-8 text-center text-sm font-medium text-slate-400 animate-pulse">Carregando reclamações...</div>
+                )}
+              </div>
+
+              {/* Refresh */}
+              {(reputation || questionsData || claimsData) && organization && (
+                <div className="flex justify-end">
+                  <button
+                    className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-600 shadow-sm transition hover:bg-slate-50 disabled:opacity-50"
+                    disabled={isLoadingReputation || isLoadingQuestions || isLoadingClaims}
+                    onClick={async () => {
+                      if (!supabaseClient) return;
+                      setIsLoadingReputation(true);
+                      setIsLoadingQuestions(true);
+                      setIsLoadingClaims(true);
+                      try {
+                        const { data: sessionData } = await supabaseClient.auth.getSession();
+                        const accessToken = sessionData.session?.access_token;
+                        if (accessToken) await loadPosVenda(organization.id, accessToken);
+                      } finally {
+                        setIsLoadingReputation(false);
+                        setIsLoadingQuestions(false);
+                        setIsLoadingClaims(false);
+                      }
+                    }}
+                    type="button"
+                  >
+                    <RefreshCw aria-hidden className={`h-4 w-4 ${isLoadingReputation ? "animate-spin" : ""}`} />
+                    Atualizar dados
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
 
           {activeView === "conector" && (
             <section className="mt-5 grid gap-5 xl:grid-cols-[0.8fr_1.2fr]">

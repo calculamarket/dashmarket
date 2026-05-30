@@ -11,6 +11,7 @@ import {
   Megaphone,
   PackageCheck,
   PackagePlus,
+  ShieldAlert,
   Target,
   WalletCards
 } from "lucide-react";
@@ -25,6 +26,7 @@ export type ViewKey =
   | "estoque_fisico"
   | "ads"
   | "ads_analysis"
+  | "pos_venda"
   | "conector"
   | "financeiro_empresa"
   | "financeiro_pessoal";
@@ -41,6 +43,7 @@ export const views: Array<{ key: ViewKey; label: string; icon: typeof BarChart3 
   { key: "estoque_fisico", label: "Estoque Físico", icon: PackagePlus },
   { key: "ads", label: "Publicidade", icon: Megaphone },
   { key: "ads_analysis", label: "Análise de Anúncios", icon: Target },
+  { key: "pos_venda", label: "Pós-venda", icon: ShieldAlert },
   { key: "conector", label: "Conector ativo", icon: Cable }
 ];
 
@@ -48,6 +51,7 @@ const groups: Array<{ label: string; keys: ViewKey[] }> = [
   { label: "Visão Geral", keys: ["principal", "ia"] },
   { label: "Operações", keys: ["produtos", "vendas", "custos", "estoque", "estoque_fisico"] },
   { label: "Marketing", keys: ["ads", "ads_analysis"] },
+  { label: "Pós-venda", keys: ["pos_venda"] },
   { label: "Financeiro", keys: ["financeiro_empresa", "financeiro_pessoal"] },
   { label: "Integrações", keys: ["conector"] }
 ];
