@@ -264,16 +264,48 @@ export async function POST(request: Request) {
           "Token expirou e nao existe refresh token salvo."
         );
       } else {
-        addCheck(
-          checks,
-          "Credenciais salvas",
-          "ok",
-          credentials.token_expires_at
-            ? `Tokens salvos. Expira em ${new Date(
-                credentials.token_expires_at
-              ).toLocaleString("pt-BR")}.`
-            : "Tokens salvos."
-        );
+        const tokenOk = credentials.token_expires_at
+          ? `Tokens salvos. Expira em ${new Date(credentials.token_expires_at).toLocaleString("pt-BR")}.`
+          : "Tokens salvos.";
+        addCheck(checks, "Credenciais salvas", "ok", tokenOk);
+
+        // Testa o token real fazendo uma chamada autenticada à API do ML
+        try {
+          const { data: creds } = await serviceClient
+            .from("marketplace_account_credentials")
+            .select("access_token, refresh_token")
+            .eq("account_id", account.id)
+            .maybeSingle();
+
+          if (creds?.access_token) {
+            const mlTestRes = await fetch(
+              `https://api.mercadolibre.com/users/${account.external_seller_id}`,
+              {
+                cache: "no-store",
+                headers: {
+                  accept: "application/json",
+                  authorization: `Bearer ${creds.access_token}`
+                }
+              }
+            );
+            if (mlTestRes.ok) {
+              addCheck(checks, "Token autenticado", "ok", "Token válido — chamada autenticada à API do ML bem-sucedida.");
+            } else if (mlTestRes.status === 401) {
+              addCheck(
+                checks,
+                "Token autenticado",
+                creds.refresh_token ? "warning" : "error",
+                creds.refresh_token
+                  ? "Token expirado, mas há refresh token. A próxima sincronização renovará automaticamente."
+                  : "Token inválido/expirado e sem refresh token. Reconecte a conta no Conector."
+              );
+            } else {
+              addCheck(checks, "Token autenticado", "warning", `API ML respondeu HTTP ${mlTestRes.status} na verificação do token.`);
+            }
+          }
+        } catch {
+          addCheck(checks, "Token autenticado", "warning", "Não foi possível testar o token autenticado.");
+        }
       }
     }
   }

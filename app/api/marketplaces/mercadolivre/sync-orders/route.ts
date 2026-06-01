@@ -341,7 +341,17 @@ async function refreshAccessToken(
   });
 
   if (!response.ok) {
-    throw new Error(`Mercado Livre recusou refresh do token: ${response.status}`);
+    const errorBody = await response.text().catch(() => "");
+    let errorDetail = `HTTP ${response.status}`;
+    try {
+      const parsed = JSON.parse(errorBody) as { error?: string; message?: string; error_description?: string };
+      const parts = [parsed.error, parsed.error_description ?? parsed.message].filter(Boolean);
+      if (parts.length > 0) errorDetail = parts.join(": ");
+    } catch { /* usa errorDetail padrão */ }
+    throw new Error(
+      `Refresh de token negado pelo Mercado Livre (${errorDetail}). ` +
+      `Reconecte a conta em Integrações → Conector ativo.`
+    );
   }
 
   const token = (await response.json()) as TokenRefreshResponse;
