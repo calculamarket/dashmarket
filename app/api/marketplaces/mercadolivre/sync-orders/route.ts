@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getMercadoLivreServerConfig } from "@/lib/marketplaces/mercadolivre-server-config";
 
@@ -155,7 +155,7 @@ type NormalizedOrder = {
 
 const MAX_ORDERS_PER_SYNC = 50000;
 const ORDERS_PAGE_SIZE = 50;
-const DEFAULT_DAYS_BACK = 30;
+const DEFAULT_DAYS_BACK = 7;
 const ORDER_DATE_FILTERS = ["order.date_created", "order.date_last_updated"] as const;
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
 
@@ -626,6 +626,199 @@ function normalizeOrder(
   };
 }
 
+async function runOrdersSync(params: {
+  supabase: ReturnType<typeof createClient>;
+  organizationId: string;
+  account: MarketplaceAccount;
+  accessToken: string;
+  dateRange: OrderSyncDateRange;
+  syncRunId: string;
+  listingsByItemId: Map<string, ListingRow>;
+}) {
+  const { supabase, organizationId, account, accessToken, dateRange, syncRunId } = params;
+
+  try {
+    const { orders, total } = await fetchOrders(
+      account.external_seller_id,
+      accessToken,
+      dateRange
+    );
+
+    const externalItemIds = Array.from(
+      new Set(
+        orders
+          .flatMap((o) => o.order_items ?? [])
+          .map((item) => item.item?.id)
+          .filter((id): id is string => Boolean(id))
+      )
+    );
+
+    const { data: listingsData } =
+      externalItemIds.length > 0
+        ? await supabase
+            .from("marketplace_listings")
+            .select("id, product_id, external_item_id, seller_sku, title")
+            .eq("marketplace_account_id", account.id)
+            .in("external_item_id", externalItemIds)
+        : { data: [] };
+
+    const listingsByItemId = new Map(
+      ((listingsData ?? []) as ListingRow[]).map((l) => [l.external_item_id, l])
+    );
+
+    const shipmentCostsById = await fetchShipmentCostsById(orders, accessToken);
+    const normalizedOrders = orders.map((order) =>
+      normalizeOrder(
+        order,
+        listingsByItemId,
+        shipmentCostsById.get(getShippingId(order) ?? ""),
+        account.external_seller_id
+      )
+    );
+
+    const productCandidates = new Map<string, { internal_sku: string; title: string }>();
+    for (const order of normalizedOrders) {
+      for (const item of order.items) {
+        productCandidates.set(item.sellerSku, { internal_sku: item.sellerSku, title: item.title });
+      }
+    }
+
+    if (productCandidates.size > 0) {
+      await supabase.from("products").upsert(
+        Array.from(productCandidates.values()).map((p) => ({
+          organization_id: organizationId,
+          internal_sku: p.internal_sku,
+          title: p.title,
+          status: "active"
+        })),
+        { onConflict: "organization_id,internal_sku" }
+      );
+    }
+
+    const skus = Array.from(productCandidates.keys());
+    const { data: productsData } =
+      skus.length > 0
+        ? await supabase
+            .from("products")
+            .select("id, internal_sku")
+            .eq("organization_id", organizationId)
+            .in("internal_sku", skus)
+        : { data: [] };
+
+    const productsBySku = new Map(
+      ((productsData ?? []) as ProductRow[]).map((p) => [p.internal_sku, p.id])
+    );
+
+    if (normalizedOrders.length > 0) {
+      await supabase.from("orders").upsert(
+        normalizedOrders.map((order) => ({
+          organization_id: organizationId,
+          marketplace_account_id: account.id,
+          provider_order_id: order.providerOrderId,
+          sold_at: order.soldAt,
+          status: order.status,
+          buyer_state: order.buyerState,
+          gross_amount: order.grossAmount,
+          marketplace_fee_amount: order.marketplaceFeeAmount,
+          shipping_cost_amount: order.shippingCostAmount,
+          discounts_amount: order.discountsAmount,
+          taxes_amount: order.taxesAmount,
+          net_amount: order.netAmount,
+          raw_payload: order.rawPayload
+        })),
+        { onConflict: "marketplace_account_id,provider_order_id" }
+      );
+    }
+
+    const providerOrderIds = normalizedOrders.map((o) => o.providerOrderId);
+    const { data: savedOrdersData } =
+      providerOrderIds.length > 0
+        ? await supabase
+            .from("orders")
+            .select("id, provider_order_id")
+            .eq("marketplace_account_id", account.id)
+            .in("provider_order_id", providerOrderIds)
+        : { data: [] };
+
+    const savedOrdersByProviderId = new Map(
+      ((savedOrdersData ?? []) as OrderRow[]).map((o) => [o.provider_order_id, o.id])
+    );
+    const savedOrderIds = Array.from(savedOrdersByProviderId.values());
+
+    if (savedOrderIds.length > 0) {
+      await supabase.from("order_items").delete().in("order_id", savedOrderIds);
+    }
+
+    const orderItemsPayload = normalizedOrders.flatMap((order) => {
+      const orderId = savedOrdersByProviderId.get(order.providerOrderId);
+      if (!orderId) return [];
+
+      return order.items.map((item) => {
+        const listing = item.externalItemId ? listingsByItemId.get(item.externalItemId) : null;
+        const itemBuyerShipping =
+          order.grossAmount > 0 ? order.buyerShippingCostAmount * (item.grossAmount / order.grossAmount) : 0;
+        const itemSellerShipping =
+          order.grossAmount > 0 ? order.sellerShippingCostAmount * (item.grossAmount / order.grossAmount) : 0;
+
+        return {
+          organization_id: organizationId,
+          order_id: orderId,
+          product_id: productsBySku.get(item.sellerSku) ?? listing?.product_id ?? null,
+          marketplace_listing_id: listing?.id ?? null,
+          external_item_id: item.externalItemId,
+          seller_sku: item.sellerSku,
+          title: item.title,
+          quantity: item.quantity,
+          unit_price: item.unitPrice,
+          gross_amount: item.grossAmount,
+          marketplace_fee_amount: item.marketplaceFeeAmount,
+          shipping_cost_amount: itemSellerShipping,
+          discount_amount: item.discountAmount,
+          raw_payload: {
+            ...item.rawPayload,
+            dashmarket_shipping: {
+              buyer_cost_amount: itemBuyerShipping,
+              seller_cost_amount: itemSellerShipping,
+              gross_amount:
+                order.grossAmount > 0
+                  ? order.shippingGrossAmount * (item.grossAmount / order.grossAmount)
+                  : 0,
+              source: order.shippingCostSource
+            }
+          }
+        };
+      });
+    });
+
+    if (orderItemsPayload.length > 0) {
+      await supabase.from("order_items").insert(orderItemsPayload);
+    }
+
+    const now = new Date().toISOString();
+    await supabase.from("marketplace_accounts").update({ last_sync_at: now }).eq("id", account.id);
+    await supabase.from("sync_runs").update({
+      status: "success",
+      finished_at: now,
+      records_processed: normalizedOrders.length,
+      metadata: {
+        date_from: dateRange.dateFrom,
+        date_to: dateRange.dateTo,
+        days_back: dateRange.daysBack,
+        remote_total: total,
+        synced_items: orderItemsPayload.length,
+        gross_amount: normalizedOrders.reduce((s, o) => s + o.grossAmount, 0)
+      }
+    }).eq("id", syncRunId);
+  } catch (error) {
+    await supabase.from("sync_runs").update({
+      status: "failed",
+      finished_at: new Date().toISOString(),
+      error_message: error instanceof Error ? error.message : "Falha ao sincronizar vendas."
+    }).eq("id", syncRunId);
+    throw error;
+  }
+}
+
 export async function POST(request: Request) {
   try {
     const { clientId, clientSecret, serviceRoleKey, supabaseUrl } = getEnv(request);
@@ -641,15 +834,10 @@ export async function POST(request: Request) {
     const dateRange = resolveDateRange(body);
 
     if (!token || !organizationId) {
-      return NextResponse.json(
-        { error: "Sessao e organizacao sao obrigatorias." },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: "Sessao e organizacao sao obrigatorias." }, { status: 401 });
     }
 
-    const supabase = createClient(supabaseUrl, serviceRoleKey, {
-      auth: { persistSession: false }
-    });
+    const supabase = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
 
     const { data: userData, error: userError } = await supabase.auth.getUser(token);
     if (userError || !userData.user) {
@@ -680,10 +868,7 @@ export async function POST(request: Request) {
 
     if (accountError) throw accountError;
     if (!account) {
-      return NextResponse.json(
-        { error: "Nenhuma conta Mercado Livre conectada." },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: "Nenhuma conta Mercado Livre conectada." }, { status: 404 });
     }
 
     const { data: credentials, error: credentialsError } = await supabase
@@ -694,33 +879,27 @@ export async function POST(request: Request) {
 
     if (credentialsError) throw credentialsError;
     if (!credentials) {
-      return NextResponse.json(
-        { error: "Credenciais do Mercado Livre nao encontradas." },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: "Credenciais do Mercado Livre nao encontradas." }, { status: 404 });
     }
 
     const currentAccount = account as MarketplaceAccount;
+
+    // Refresh do token antes de retornar resposta (rápido, uma chamada HTTP)
     const accessToken = await refreshAccessToken(
       credentials as MarketplaceCredentials,
       currentAccount.id,
       async (payload) => {
-        const { error } = await supabase
-          .from("marketplace_account_credentials")
-          .upsert(payload);
-
+        const { error } = await supabase.from("marketplace_account_credentials").upsert(payload);
         if (error) throw error;
       },
       clientId,
       clientSecret,
       async () => {
-        await supabase
-          .from("marketplace_accounts")
-          .update({ status: "expired" })
-          .eq("id", currentAccount.id);
+        await supabase.from("marketplace_accounts").update({ status: "expired" }).eq("id", currentAccount.id);
       }
     );
 
+    // Cria o registro do sync run antes de retornar
     const { data: syncRun, error: syncRunError } = await supabase
       .from("sync_runs")
       .insert({
@@ -729,277 +908,38 @@ export async function POST(request: Request) {
         provider: "mercadolivre",
         resource: "orders",
         status: "running",
-        metadata: {
-          date_from: dateRange.dateFrom,
-          date_to: dateRange.dateTo,
-          days_back: dateRange.daysBack,
-          source: "manual"
-        }
+        metadata: { date_from: dateRange.dateFrom, date_to: dateRange.dateTo, days_back: dateRange.daysBack, source: "manual" }
       })
       .select("id")
       .single();
 
     if (syncRunError) throw syncRunError;
 
-    try {
-      const { orders, total } = await fetchOrders(
-        currentAccount.external_seller_id,
+    // Agenda o sync pesado para rodar APÓS a resposta HTTP (sem timeout de Vercel)
+    after(async () => {
+      await runOrdersSync({
+        supabase,
+        organizationId,
+        account: currentAccount,
         accessToken,
-        dateRange
-      );
-      const externalItemIds = Array.from(
-        new Set(
-          orders
-            .flatMap((order) => order.order_items ?? [])
-            .map((item) => item.item?.id)
-            .filter((id): id is string => Boolean(id))
-        )
-      );
-
-      const { data: listingsData, error: listingsError } =
-        externalItemIds.length > 0
-          ? await supabase
-              .from("marketplace_listings")
-              .select("id, product_id, external_item_id, seller_sku, title")
-              .eq("marketplace_account_id", currentAccount.id)
-              .in("external_item_id", externalItemIds)
-          : { data: [], error: null };
-
-      if (listingsError) throw listingsError;
-
-      const listingsByItemId = new Map(
-        ((listingsData ?? []) as ListingRow[]).map((listing) => [
-          listing.external_item_id,
-          listing
-        ])
-      );
-      const shipmentCostsById = await fetchShipmentCostsById(orders, accessToken);
-      const normalizedOrders = orders.map((order) =>
-        normalizeOrder(
-          order,
-          listingsByItemId,
-          shipmentCostsById.get(getShippingId(order) ?? ""),
-          currentAccount.external_seller_id
-        )
-      );
-      const productCandidates = new Map<string, { internal_sku: string; title: string }>();
-
-      for (const order of normalizedOrders) {
-        for (const item of order.items) {
-          productCandidates.set(item.sellerSku, {
-            internal_sku: item.sellerSku,
-            title: item.title
-          });
-        }
-      }
-
-      if (productCandidates.size > 0) {
-        const { error: productsUpsertError } = await supabase
-          .from("products")
-          .upsert(
-            Array.from(productCandidates.values()).map((product) => ({
-              organization_id: organizationId,
-              internal_sku: product.internal_sku,
-              title: product.title,
-              status: "active"
-            })),
-            { onConflict: "organization_id,internal_sku" }
-          );
-
-        if (productsUpsertError) throw productsUpsertError;
-      }
-
-      const skus = Array.from(productCandidates.keys());
-      const { data: productsData, error: productsError } =
-        skus.length > 0
-          ? await supabase
-              .from("products")
-              .select("id, internal_sku")
-              .eq("organization_id", organizationId)
-              .in("internal_sku", skus)
-          : { data: [], error: null };
-
-      if (productsError) throw productsError;
-
-      const productsBySku = new Map(
-        ((productsData ?? []) as ProductRow[]).map((product) => [
-          product.internal_sku,
-          product.id
-        ])
-      );
-
-      if (normalizedOrders.length > 0) {
-        const { error: ordersUpsertError } = await supabase.from("orders").upsert(
-          normalizedOrders.map((order) => ({
-            organization_id: organizationId,
-            marketplace_account_id: currentAccount.id,
-            provider_order_id: order.providerOrderId,
-            sold_at: order.soldAt,
-            status: order.status,
-            buyer_state: order.buyerState,
-            gross_amount: order.grossAmount,
-            marketplace_fee_amount: order.marketplaceFeeAmount,
-            shipping_cost_amount: order.shippingCostAmount,
-            discounts_amount: order.discountsAmount,
-            taxes_amount: order.taxesAmount,
-            net_amount: order.netAmount,
-            raw_payload: order.rawPayload
-          })),
-          { onConflict: "marketplace_account_id,provider_order_id" }
-        );
-
-        if (ordersUpsertError) throw ordersUpsertError;
-      }
-
-      const providerOrderIds = normalizedOrders.map((order) => order.providerOrderId);
-      const { data: savedOrdersData, error: savedOrdersError } =
-        providerOrderIds.length > 0
-          ? await supabase
-              .from("orders")
-              .select("id, provider_order_id")
-              .eq("marketplace_account_id", currentAccount.id)
-              .in("provider_order_id", providerOrderIds)
-          : { data: [], error: null };
-
-      if (savedOrdersError) throw savedOrdersError;
-
-      const savedOrdersByProviderId = new Map(
-        ((savedOrdersData ?? []) as OrderRow[]).map((order) => [
-          order.provider_order_id,
-          order.id
-        ])
-      );
-      const savedOrderIds = Array.from(savedOrdersByProviderId.values());
-
-      if (savedOrderIds.length > 0) {
-        const { error: deleteItemsError } = await supabase
-          .from("order_items")
-          .delete()
-          .in("order_id", savedOrderIds);
-
-        if (deleteItemsError) throw deleteItemsError;
-      }
-
-      const orderItemsPayload = normalizedOrders.flatMap((order) => {
-        const orderId = savedOrdersByProviderId.get(order.providerOrderId);
-        if (!orderId) return [];
-
-        return order.items.map((item) => {
-          const listing = item.externalItemId
-            ? listingsByItemId.get(item.externalItemId)
-            : null;
-          const itemBuyerShippingCost =
-            order.grossAmount > 0
-              ? order.buyerShippingCostAmount *
-                (item.grossAmount / order.grossAmount)
-              : 0;
-          const itemSellerShippingCost =
-            order.grossAmount > 0
-              ? order.sellerShippingCostAmount *
-                (item.grossAmount / order.grossAmount)
-              : 0;
-
-          return {
-            organization_id: organizationId,
-            order_id: orderId,
-            product_id: productsBySku.get(item.sellerSku) ?? listing?.product_id ?? null,
-            marketplace_listing_id: listing?.id ?? null,
-            external_item_id: item.externalItemId,
-            seller_sku: item.sellerSku,
-            title: item.title,
-            quantity: item.quantity,
-            unit_price: item.unitPrice,
-            gross_amount: item.grossAmount,
-            marketplace_fee_amount: item.marketplaceFeeAmount,
-            shipping_cost_amount: itemSellerShippingCost,
-            discount_amount: item.discountAmount,
-            raw_payload: {
-              ...item.rawPayload,
-              dashmarket_shipping: {
-                buyer_cost_amount: itemBuyerShippingCost,
-                seller_cost_amount: itemSellerShippingCost,
-                gross_amount:
-                  order.grossAmount > 0
-                    ? order.shippingGrossAmount *
-                      (item.grossAmount / order.grossAmount)
-                    : 0,
-                source: order.shippingCostSource
-              }
-            }
-          };
-        });
+        dateRange,
+        syncRunId: syncRun.id,
+        listingsByItemId: new Map()
       });
+    });
 
-      if (orderItemsPayload.length > 0) {
-        const { error: orderItemsError } = await supabase
-          .from("order_items")
-          .insert(orderItemsPayload);
-
-        if (orderItemsError) throw orderItemsError;
-      }
-
-      const now = new Date().toISOString();
-
-      await supabase
-        .from("marketplace_accounts")
-        .update({ last_sync_at: now })
-        .eq("id", currentAccount.id);
-
-      await supabase
-        .from("sync_runs")
-        .update({
-          status: "success",
-          finished_at: now,
-          records_processed: normalizedOrders.length,
-          metadata: {
-            date_from: dateRange.dateFrom,
-            date_to: dateRange.dateTo,
-            days_back: dateRange.daysBack,
-            remote_total: total,
-            synced_items: orderItemsPayload.length,
-            gross_amount: normalizedOrders.reduce(
-              (sum, order) => sum + order.grossAmount,
-              0
-            )
-          }
-        })
-        .eq("id", syncRun.id);
-
-      return NextResponse.json({
-        accountName: currentAccount.account_name,
-        daysBack: dateRange.daysBack,
-        dateFrom: dateRange.dateFrom,
-        dateTo: dateRange.dateTo,
-        remoteTotal: total,
-        syncedOrders: normalizedOrders.length,
-        syncedItems: orderItemsPayload.length,
-        grossAmount: normalizedOrders.reduce(
-          (sum, order) => sum + order.grossAmount,
-          0
-        ),
-        syncedAt: now
-      });
-    } catch (error) {
-      await supabase
-        .from("sync_runs")
-        .update({
-          status: "failed",
-          finished_at: new Date().toISOString(),
-          error_message:
-            error instanceof Error ? error.message : "Falha ao sincronizar vendas."
-        })
-        .eq("id", syncRun.id);
-
-      throw error;
-    }
+    // Retorna 202 imediatamente — o cliente pode recarregar os dados após alguns segundos
+    return NextResponse.json({
+      accountName: currentAccount.account_name,
+      daysBack: dateRange.daysBack,
+      dateFrom: dateRange.dateFrom,
+      dateTo: dateRange.dateTo,
+      syncRunId: syncRun.id,
+      background: true
+    }, { status: 202 });
   } catch (error) {
     return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Nao foi possivel sincronizar vendas."
-      },
+      { error: error instanceof Error ? error.message : "Nao foi possivel sincronizar vendas." },
       { status: 500 }
     );
   }

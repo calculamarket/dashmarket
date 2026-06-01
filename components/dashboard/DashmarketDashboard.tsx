@@ -5702,6 +5702,7 @@ export function DashmarketDashboard() {
 
       const payload = (await response.json()) as
         | SyncOrdersSummary
+        | { background?: boolean; syncRunId?: string; accountName?: string; dateFrom?: string; dateTo?: string; daysBack?: number }
         | { error?: string };
 
       if (!response.ok) {
@@ -5712,6 +5713,26 @@ export function DashmarketDashboard() {
         );
       }
 
+      // 202 = sync iniciado em background
+      if (response.status === 202 && "background" in payload && payload.background) {
+        const bg = payload as { accountName?: string; dateFrom?: string; dateTo?: string; daysBack?: number };
+        const periodo = bg.dateFrom && bg.dateTo
+          ? `de ${new Date(`${bg.dateFrom}T00:00:00`).toLocaleDateString("pt-BR")} a ${new Date(`${bg.dateTo}T00:00:00`).toLocaleDateString("pt-BR")}`
+          : `dos últimos ${bg.daysBack ?? 7} dias`;
+        setDataMessage(`Sincronização iniciada em background (${periodo}). Atualizando em 20 segundos...`);
+        await loadSyncRuns(organization.id);
+
+        // Aguarda 20 segundos e recarrega as vendas automaticamente
+        await new Promise((resolve) => setTimeout(resolve, 20000));
+        await loadSales(organization.id);
+        await loadCostCenter(organization.id);
+        await loadMarketplaceAccounts(organization.id);
+        await loadSyncRuns(organization.id);
+        setDataMessage(`Vendas atualizadas (${periodo}). Confira o Histórico de Sincronização para detalhes.`);
+        return;
+      }
+
+      // 200 legacy (caso o endpoint ainda retorne síncrono)
       const summary = payload as SyncOrdersSummary;
       setOrdersSyncSummary(summary);
       const syncedPeriod =
