@@ -2642,7 +2642,9 @@ export function DashmarketDashboard() {
 
     for (const sale of salesDateAndSearchRows) {
       const group = orderStatusGroup(sale.status);
-      totals[group].amount += sale.grossAmount;
+      // Subtrai desconto (cupons ML, promoções) para alinhar com o
+      // "Faturamento" exibido no painel do Mercado Livre (= total_amount)
+      totals[group].amount += sale.grossAmount - sale.discountAmount;
       totals[group].orders.add(sale.orderId);
       totals[group].quantity += sale.quantity;
     }
@@ -2671,7 +2673,7 @@ export function DashmarketDashboard() {
         (totals, sale) =>
           isApprovedOrderStatus(sale.status)
             ? {
-                grossAmount: totals.grossAmount + sale.grossAmount,
+                grossAmount: totals.grossAmount + (sale.grossAmount - sale.discountAmount),
                 costAmount: totals.costAmount + sale.costAmount,
                 taxAmount: totals.taxAmount + sale.taxAmount,
                 marketplaceFee: totals.marketplaceFee + sale.marketplaceFee,
@@ -3634,6 +3636,7 @@ export function DashmarketDashboard() {
         orderGrossAmount > 0 ? orderTaxAmount * (grossAmount / orderGrossAmount) : 0;
 
       if (isApprovedOrderStatus(orderStatus)) {
+        const discountAmount = numberFromDb(row.discount_amount);
         const current =
           salesBySku.get(sku) ??
           ({
@@ -3650,10 +3653,11 @@ export function DashmarketDashboard() {
 
         current.units += numberFromDb(row.quantity);
         current.orders += 1;
-        current.grossRevenue += grossAmount;
+        // Usa gross_amount - discount_amount para alinhar com o painel ML (= total_amount)
+        current.grossRevenue += grossAmount - discountAmount;
         current.marketplaceFees += numberFromDb(row.marketplace_fee_amount);
         current.shippingCosts += shippingAmounts.seller;
-        current.discounts += numberFromDb(row.discount_amount);
+        current.discounts += discountAmount;
         current.taxes += allocatedTaxAmount;
         salesBySku.set(sku, current);
       }
