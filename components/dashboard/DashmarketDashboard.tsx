@@ -2333,8 +2333,11 @@ export function DashmarketDashboard() {
 
   const selectedAdapter = getMarketplaceAdapter(selectedProvider);
   const mercadoLivreAccount = marketplaceAccounts.find(
-    (account) => account.provider === "mercadolivre" && account.status === "connected"
+    (account) =>
+      account.provider === "mercadolivre" &&
+      (account.status === "connected" || account.status === "expired")
   );
+  const mercadoLivreConnected = mercadoLivreAccount?.status === "connected";
   const isMarketplaceWorkspaceReady =
     supabaseStatus === "connected" && Boolean(organization);
   const isSyncingMarketplace =
@@ -2363,7 +2366,7 @@ export function DashmarketDashboard() {
     ? "Conectando"
     : isSyncingListings
       ? "Sincronizando"
-      : mercadoLivreAccount
+      : mercadoLivreConnected
         ? "Sincronizar SKUs"
         : "Conectar Mercado Livre";
   const marginRows = useMemo(
@@ -6952,37 +6955,37 @@ export function DashmarketDashboard() {
                   </div>
 
                   <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    {/* Conectar / Sincronizar anúncios */}
                     <button
                       className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-ink px-4 text-sm font-bold text-white transition hover:bg-black disabled:cursor-not-allowed disabled:opacity-50 shadow-sm"
                       disabled={isMarketplaceConnectDisabled}
-                      onClick={
-                        mercadoLivreAccount
-                          ? syncMercadoLivreListings
-                          : connectMercadoLivre
-                      }
+                      onClick={mercadoLivreConnected ? syncMercadoLivreListings : connectMercadoLivre}
                       type="button"
                     >
                       <Cable aria-hidden className="h-4 w-4" />
                       {marketplaceSkuActionLabel}
                     </button>
+                    {/* Vendas */}
                     <button
                       className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-sea px-4 text-sm font-bold text-white transition hover:bg-sea/90 disabled:cursor-not-allowed disabled:opacity-50 shadow-sm"
-                      disabled={!mercadoLivreAccount || isMarketplaceActionDisabled}
+                      disabled={!mercadoLivreConnected || isMarketplaceActionDisabled}
                       onClick={syncMercadoLivreOrders}
                       type="button"
                     >
                       <ClipboardList aria-hidden className="h-4 w-4" />
                       {isSyncingOrders ? "Sincronizando..." : "Vendas"}
                     </button>
+                    {/* Estoque */}
                     <button
                       className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-moss px-4 text-sm font-bold text-white transition hover:bg-moss/90 disabled:cursor-not-allowed disabled:opacity-50 shadow-sm"
-                      disabled={!mercadoLivreAccount || isMarketplaceActionDisabled}
+                      disabled={!mercadoLivreConnected || isMarketplaceActionDisabled}
                       onClick={syncMercadoLivreInventory}
                       type="button"
                     >
                       <Boxes aria-hidden className="h-4 w-4" />
                       {isSyncingInventory ? "Sincronizando..." : "Estoque"}
                     </button>
+                    {/* Diagnóstico */}
                     <button
                       className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-white px-4 text-sm font-bold text-ink ring-1 ring-slate-200 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                       disabled={!isMarketplaceWorkspaceReady || isDiagnosingMarketplace}
@@ -6992,30 +6995,37 @@ export function DashmarketDashboard() {
                       <Search aria-hidden className="h-4 w-4 text-slate-400" />
                       {isDiagnosingMarketplace ? "Testando..." : "Diagnóstico"}
                     </button>
+                    {/* Reconectar — aparece sempre que há conta (connected ou expired) */}
                     {mercadoLivreAccount && (
                       <button
-                        className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-amber-50 px-4 text-sm font-bold text-amber-700 ring-1 ring-amber-200 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
+                        className={`inline-flex h-11 items-center justify-center gap-2 rounded-lg px-4 text-sm font-bold ring-1 transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                          mercadoLivreAccount.status === "expired"
+                            ? "bg-rose-50 text-rose-700 ring-rose-200 hover:bg-rose-100"
+                            : "bg-amber-50 text-amber-700 ring-amber-200 hover:bg-amber-100"
+                        }`}
                         disabled={isMarketplaceConnectDisabled}
                         onClick={connectMercadoLivre}
                         title="Refaz o fluxo OAuth para renovar o token de acesso"
                         type="button"
                       >
                         <RefreshCw aria-hidden className="h-4 w-4" />
-                        Reconectar
+                        {mercadoLivreAccount.status === "expired" ? "Reconectar (token expirado)" : "Reconectar"}
                       </button>
                     )}
+                    {/* Ads */}
                     <button
                       className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-white px-4 text-sm font-bold text-ink ring-1 ring-slate-200 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-                      disabled={!mercadoLivreAccount || isMarketplaceActionDisabled}
+                      disabled={!mercadoLivreConnected || isMarketplaceActionDisabled}
                       onClick={syncMercadoLivreAdvertising}
                       type="button"
                     >
                       <Megaphone aria-hidden className="h-4 w-4 text-slate-400" />
                       {isSyncingAdvertising ? "Sincronizando..." : "Ads"}
                     </button>
+                    {/* Promoções */}
                     <button
                       className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-white px-4 text-sm font-bold text-ink ring-1 ring-slate-200 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-                      disabled={!mercadoLivreAccount || isMarketplaceActionDisabled}
+                      disabled={!mercadoLivreConnected || isMarketplaceActionDisabled}
                       onClick={syncMercadoLivrePromotions}
                       type="button"
                     >
@@ -7024,13 +7034,46 @@ export function DashmarketDashboard() {
                     </button>
                   </div>
 
-                  {marketplaceConnectionHint && (
-                    <div className="mt-6 rounded-xl bg-amber-50 p-4 ring-1 ring-amber-200/50">
-                      <div className="flex gap-3">
-                        <Search className="h-5 w-5 text-clay shrink-0" />
-                        <p className="text-sm font-medium text-amber-900/80 leading-relaxed">
-                          {marketplaceConnectionHint}
-                        </p>
+                  {/* Feedback de ações — dataMessage e diagnóstico mostrados diretamente no Conector */}
+                  {(dataMessage || marketplaceConnectionHint) && (
+                    <div className="mt-4 rounded-xl bg-amber-50 p-4 ring-1 ring-amber-200/50">
+                      <p className="text-sm font-medium text-amber-900/80 leading-relaxed">
+                        {dataMessage ?? marketplaceConnectionHint}
+                      </p>
+                    </div>
+                  )}
+
+                  {marketplaceDiagnostics && (
+                    <div className="mt-4 grid gap-2">
+                      <div className={`rounded-lg px-4 py-3 ring-1 ${
+                        marketplaceDiagnostics.status === "ok"
+                          ? "bg-emerald-50 ring-emerald-200"
+                          : marketplaceDiagnostics.status === "warning"
+                            ? "bg-amber-50 ring-amber-200"
+                            : "bg-rose-50 ring-rose-200"
+                      }`}>
+                        <p className="text-xs font-bold uppercase tracking-wider text-black/40">Resultado do diagnóstico</p>
+                        <p className="mt-1 font-semibold text-ink">{marketplaceDiagnostics.summary}</p>
+                        {marketplaceDiagnostics.redirectUri && (
+                          <p className="mt-1 text-xs text-black/50">Callback: {marketplaceDiagnostics.redirectUri}</p>
+                        )}
+                      </div>
+                      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                        {marketplaceDiagnostics.checks.map((check) => (
+                          <div
+                            key={`${check.label}-${check.message}`}
+                            className={`rounded-lg px-3 py-2 ring-1 ${
+                              check.status === "ok"
+                                ? "bg-emerald-50 ring-emerald-100"
+                                : check.status === "warning"
+                                  ? "bg-amber-50 ring-amber-100"
+                                  : "bg-rose-50 ring-rose-100"
+                            }`}
+                          >
+                            <p className="text-[10px] font-bold uppercase tracking-wider text-black/40">{check.label}</p>
+                            <p className="mt-0.5 text-sm font-semibold text-ink">{check.message}</p>
+                          </div>
+                        ))}
                       </div>
                     </div>
                   )}
