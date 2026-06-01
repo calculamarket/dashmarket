@@ -318,7 +318,8 @@ async function refreshAccessToken(
   accountId: string,
   saveCredentials: (payload: MarketplaceCredentialsUpsert) => Promise<void>,
   clientId: string,
-  clientSecret: string
+  clientSecret: string,
+  markAccountExpired?: () => Promise<void>
 ) {
   if (!credentials.refresh_token || !isTokenExpiring(credentials)) {
     return credentials.access_token;
@@ -343,11 +344,20 @@ async function refreshAccessToken(
   if (!response.ok) {
     const errorBody = await response.text().catch(() => "");
     let errorDetail = `HTTP ${response.status}`;
+    let mlError = "";
     try {
       const parsed = JSON.parse(errorBody) as { error?: string; message?: string; error_description?: string };
+      mlError = parsed.error ?? "";
       const parts = [parsed.error, parsed.error_description ?? parsed.message].filter(Boolean);
       if (parts.length > 0) errorDetail = parts.join(": ");
     } catch { /* usa errorDetail padrão */ }
+
+    // Se o erro for permanente (token revogado/expirado), marca conta como expirada
+    const isPermanentError = ["invalid_grant", "invalid_token", "unauthorized_client"].includes(mlError);
+    if (isPermanentError && markAccountExpired) {
+      await markAccountExpired().catch(() => {});
+    }
+
     throw new Error(
       `Refresh de token negado pelo Mercado Livre (${errorDetail}). ` +
       `Reconecte a conta em Integrações → Conector ativo.`
@@ -702,7 +712,13 @@ export async function POST(request: Request) {
         if (error) throw error;
       },
       clientId,
-      clientSecret
+      clientSecret,
+      async () => {
+        await supabase
+          .from("marketplace_accounts")
+          .update({ status: "expired" })
+          .eq("id", currentAccount.id);
+      }
     );
 
     const { data: syncRun, error: syncRunError } = await supabase

@@ -6894,21 +6894,36 @@ export function DashmarketDashboard() {
                   </div>
 
                   <div className="mt-6 rounded-xl bg-white/5 p-4 text-sm text-white/80 ring-1 ring-white/10">
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between gap-2">
                       <p className="font-bold text-white">
                         {mercadoLivreAccount?.account_name ?? "Modo demonstrativo"}
                       </p>
-                      {mercadoLivreAccount && (
-                        <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-bold text-emerald-400 ring-1 ring-emerald-500/30">
-                          Ativo
-                        </span>
-                      )}
+                      {mercadoLivreAccount && (() => {
+                        const expiresAt = mercadoLivreAccount.last_sync_at
+                          ? null
+                          : null;
+                        const isExpired = mercadoLivreAccount.status === "expired";
+                        return isExpired ? (
+                          <span className="rounded-full bg-rose-500/20 px-2 py-0.5 text-[10px] font-bold text-rose-400 ring-1 ring-rose-500/30">
+                            Token expirado
+                          </span>
+                        ) : (
+                          <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-bold text-emerald-400 ring-1 ring-emerald-500/30">
+                            {mercadoLivreAccount.status === "connected" ? "Ativo" : mercadoLivreAccount.status}
+                          </span>
+                        );
+                      })()}
                     </div>
                     <p className="mt-1 text-xs text-white/50">
                       {mercadoLivreAccount
-                        ? `ID: ${mercadoLivreAccount.external_seller_id}`
+                        ? `ID: ${mercadoLivreAccount.external_seller_id}${mercadoLivreAccount.last_sync_at ? ` · Último sync: ${new Date(mercadoLivreAccount.last_sync_at).toLocaleDateString("pt-BR")}` : ""}`
                         : "Conecte sua conta para começar"}
                     </p>
+                    {mercadoLivreAccount?.status === "expired" && (
+                      <p className="mt-2 text-xs text-rose-400">
+                        Token expirado. Clique em Reconectar para renovar o acesso.
+                      </p>
+                    )}
                   </div>
                 </section>
 
@@ -6977,6 +6992,18 @@ export function DashmarketDashboard() {
                       <Search aria-hidden className="h-4 w-4 text-slate-400" />
                       {isDiagnosingMarketplace ? "Testando..." : "Diagnóstico"}
                     </button>
+                    {mercadoLivreAccount && (
+                      <button
+                        className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-amber-50 px-4 text-sm font-bold text-amber-700 ring-1 ring-amber-200 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
+                        disabled={isMarketplaceConnectDisabled}
+                        onClick={connectMercadoLivre}
+                        title="Refaz o fluxo OAuth para renovar o token de acesso"
+                        type="button"
+                      >
+                        <RefreshCw aria-hidden className="h-4 w-4" />
+                        Reconectar
+                      </button>
+                    )}
                     <button
                       className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-white px-4 text-sm font-bold text-ink ring-1 ring-slate-200 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                       disabled={!mercadoLivreAccount || isMarketplaceActionDisabled}
