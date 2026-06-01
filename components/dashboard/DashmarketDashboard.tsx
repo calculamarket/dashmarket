@@ -5692,7 +5692,8 @@ export function DashmarketDashboard() {
           organizationId: organization.id,
           daysBack: daysBackFromDate(salesFilters.dateFrom),
           dateFrom: salesFilters.dateFrom,
-          dateTo: salesFilters.dateTo
+          // Sempre sincroniza até hoje, independente do filtro de exibição
+          dateTo: dateOnly(new Date())
         })
       });
 
@@ -6121,6 +6122,18 @@ export function DashmarketDashboard() {
     setDataMessage(detail ? `${message} Detalhe: ${detail}` : message);
     window.history.replaceState({}, "", window.location.pathname);
   }, []);
+
+  // Atualiza dateTo para hoje toda vez que o usuário entra na view de vendas
+  // Evita que o filtro fique travado na data em que a página foi carregada
+  useEffect(() => {
+    if (activeView === "vendas") {
+      const hoje = dateOnly(new Date());
+      setSalesFilters((current) => {
+        if (current.dateTo === hoje) return current;
+        return { ...current, dateTo: hoje };
+      });
+    }
+  }, [activeView]);
 
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900">
