@@ -328,6 +328,38 @@ type SalesDetailRow = SalesDetailSourceRow & {
 
 type CostCalculatorMode = "margin" | "price" | "fixedProfit";
 
+type MarketplacePresetId =
+  | "ml-classico" | "ml-premium" | "ml-premium-full"
+  | "shopee-ate80" | "shopee-80-200" | "shopee-200-500"
+  | "amazon" | "magalu" | "americanas" | "custom";
+
+type MarketplacePreset = {
+  id: MarketplacePresetId;
+  label: string;
+  commission: number;
+  fixedFee: number;
+  hint?: string;
+};
+
+const MARKETPLACE_PRESETS: MarketplacePreset[] = [
+  { id: "ml-classico",      label: "ML Clássico",          commission: 11, fixedFee: 0 },
+  { id: "ml-premium",       label: "ML Premium",           commission: 16, fixedFee: 0 },
+  { id: "ml-premium-full",  label: "ML Premium Full",      commission: 16, fixedFee: 0, hint: "Inclua coleta e armazenagem" },
+  { id: "shopee-ate80",     label: "Shopee (até R$79)",    commission: 20, fixedFee: 4 },
+  { id: "shopee-80-200",    label: "Shopee (R$80–R$199)",  commission: 14, fixedFee: 16 },
+  { id: "shopee-200-500",   label: "Shopee (R$200–R$499)", commission: 14, fixedFee: 26 },
+  { id: "amazon",           label: "Amazon",               commission: 15, fixedFee: 0 },
+  { id: "magalu",           label: "Magalu",               commission: 16, fixedFee: 0 },
+  { id: "americanas",       label: "Americanas",           commission: 14, fixedFee: 0 },
+  { id: "custom",           label: "Personalizado",        commission: 0,  fixedFee: 0 }
+];
+
+function getShopeePreset(price: number): MarketplacePresetId {
+  if (price < 80) return "shopee-ate80";
+  if (price < 200) return "shopee-80-200";
+  return "shopee-200-500";
+}
+
 type CostCalculatorFormState = {
   sku: string;
   name: string;
@@ -342,6 +374,7 @@ type CostCalculatorFormState = {
   operationalCost: string;
   taxPercentage: string;
   adTacosPercentage: string;
+  affiliateCommissionPercentage: string;
   promotionCredit: string;
   desiredProfitMargin: string;
   desiredFixedProfit: string;
@@ -360,10 +393,12 @@ type CostCalculatorResult = {
   operationalCost: number;
   taxes: number;
   advertisingInvestment: number;
+  affiliateCommission: number;
   promotionCredit: number;
   totalCosts: number;
   netProfit: number;
   profitMargin: number;
+  markup: number;
 };
 
 type CalculatorCostEntry = {
@@ -1796,7 +1831,10 @@ function calculateCostsFromCalculator(
   const operationalCost = numberFromInput(form.operationalCost);
   const taxPercentage = numberFromInput(form.taxPercentage);
   const adTacosPercentage = numberFromInput(form.adTacosPercentage);
+  const affiliateCommissionPercentage = numberFromInput(form.affiliateCommissionPercentage);
   const promotionCredit = numberFromInput(form.promotionCredit);
+  const totalVariablePercentage = commissionPercentage + taxPercentage + adTacosPercentage + affiliateCommissionPercentage;
+
   const fixedCosts =
     productCost +
     fixedFee +
@@ -1809,23 +1847,15 @@ function calculateCostsFromCalculator(
 
   if (mode === "price") {
     const desiredProfitMargin = numberFromInput(form.desiredProfitMargin);
-    const variablePercentage =
-      desiredProfitMargin +
-      commissionPercentage +
-      taxPercentage +
-      adTacosPercentage;
-
+    const variablePercentage = desiredProfitMargin + totalVariablePercentage;
     if (desiredProfitMargin <= 0 || variablePercentage >= 100) return null;
     sellingPrice = fixedCosts / (1 - variablePercentage / 100);
   }
 
   if (mode === "fixedProfit") {
     const desiredFixedProfit = numberFromInput(form.desiredFixedProfit);
-    const variablePercentage =
-      commissionPercentage + taxPercentage + adTacosPercentage;
-
-    if (desiredFixedProfit <= 0 || variablePercentage >= 100) return null;
-    sellingPrice = (fixedCosts + desiredFixedProfit) / (1 - variablePercentage / 100);
+    if (desiredFixedProfit <= 0 || totalVariablePercentage >= 100) return null;
+    sellingPrice = (fixedCosts + desiredFixedProfit) / (1 - totalVariablePercentage / 100);
   }
 
   if (sellingPrice <= 0) return null;
@@ -1833,6 +1863,7 @@ function calculateCostsFromCalculator(
   const commission = sellingPrice * (commissionPercentage / 100);
   const taxes = sellingPrice * (taxPercentage / 100);
   const advertisingInvestment = sellingPrice * (adTacosPercentage / 100);
+  const affiliateCommission = sellingPrice * (affiliateCommissionPercentage / 100);
   const totalCosts =
     productCost +
     commission +
@@ -1843,9 +1874,11 @@ function calculateCostsFromCalculator(
     storageCost +
     operationalCost +
     advertisingInvestment +
+    affiliateCommission +
     taxes;
   const netProfit = sellingPrice - totalCosts + promotionCredit;
   const profitMargin = sellingPrice > 0 ? netProfit / sellingPrice : 0;
+  const markup = productCost > 0 ? (netProfit / productCost) * 100 : 0;
 
   return {
     sellingPrice,
@@ -1859,10 +1892,12 @@ function calculateCostsFromCalculator(
     operationalCost,
     taxes,
     advertisingInvestment,
+    affiliateCommission,
     promotionCredit,
     totalCosts,
     netProfit,
-    profitMargin
+    profitMargin,
+    markup
   };
 }
 
@@ -2086,6 +2121,8 @@ export function DashmarketDashboard() {
     useState<MercadoLivreDiagnosticsResponse | null>(null);
   const [calculatorMode, setCalculatorMode] =
     useState<CostCalculatorMode>("margin");
+  const [selectedPreset, setSelectedPreset] = useState<MarketplacePresetId>("ml-premium");
+  const [calculatorTab, setCalculatorTab] = useState<"calc" | "alerts" | "simulator" | "promo" | "pareto">("calc");
   const [calculatorForm, setCalculatorForm] = useState<CostCalculatorFormState>({
     sku: salesSeed[0].sku,
     name: salesSeed[0].title,
@@ -2100,11 +2137,16 @@ export function DashmarketDashboard() {
     operationalCost: "",
     taxPercentage: "",
     adTacosPercentage: "",
+    affiliateCommissionPercentage: "",
     promotionCredit: "",
     desiredProfitMargin: "15",
     desiredFixedProfit: "",
     validFrom: dateOnly(new Date())
   });
+  const [alertThreshold, setAlertThreshold] = useState(15);
+  const [promoDiscount, setPromoDiscount] = useState({ type: "percent" as "percent" | "fixed", value: "" });
+  const [whatIfSku, setWhatIfSku] = useState("");
+  const [whatIfSliders, setWhatIfSliders] = useState({ price: 0, commission: 0, shipping: 0, tax: 0 });
   const [costProductSearch, setCostProductSearch] = useState("");
   const [adAnalysisSearch, setAdAnalysisSearch] = useState("");
   const [adAnalysisTarget, setAdAnalysisTarget] = useState("");
@@ -9632,83 +9674,127 @@ export function DashmarketDashboard() {
 
           {activeView === "custos" && (
             <section className="mt-5 grid gap-5">
-              <section className="rounded-lg border border-black/10 bg-white shadow-sm">
-                <div className="border-b border-black/10 p-4">
+              {/* ── Sub-tabs ── */}
+              <div className="flex flex-wrap gap-2">
+                {([
+                  ["calc",      "Calculadora"],
+                  ["alerts",    "Alertas de Margem"],
+                  ["simulator", "Simulador"],
+                  ["promo",     "Promoção"],
+                  ["pareto",    "Ranking Pareto"]
+                ] as const).map(([tab, label]) => (
+                  <button
+                    className={`h-9 rounded-xl px-4 text-sm font-bold ring-1 transition ${
+                      calculatorTab === tab
+                        ? "bg-slate-900 text-white ring-slate-900 shadow-sm"
+                        : "bg-white text-slate-600 ring-slate-200 hover:bg-slate-50"
+                    }`}
+                    key={tab}
+                    onClick={() => setCalculatorTab(tab)}
+                    type="button"
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              {/* ── Calculadora ── */}
+              {calculatorTab === "calc" && (
+              <section className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+                <div className="border-b border-slate-200 bg-slate-50/50 px-5 py-4">
                   <div className="flex items-center gap-2">
                     <CircleDollarSign aria-hidden className="h-5 w-5 text-sea" />
-                    <h2 className="text-lg font-bold">Calculadora de custos</h2>
+                    <h2 className="text-lg font-bold text-slate-900">Calculadora de Custos</h2>
                   </div>
-                  <p className="text-sm text-black/60">
-                    Simule preco, custo e margem por SKU antes de aplicar no Centro de Custos.
+                  <p className="text-sm text-slate-500">
+                    Simule preço, custo e margem por SKU. Selecione um marketplace para preencher a comissão automaticamente.
                   </p>
                 </div>
 
-                <div className="grid gap-5 p-4 xl:grid-cols-[1.25fr_0.75fr]">
-                  <div className="grid gap-4">
-                    <div className="grid gap-3 md:grid-cols-3">
-                      <label className="grid gap-1 text-sm font-semibold">
+                <div className="grid gap-6 p-5 xl:grid-cols-[1fr_340px]">
+                  <div className="grid gap-5">
+
+                    {/* SKU + Produto */}
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      <label className="grid gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-500">
                         SKU
                         <select
-                          className="h-10 rounded-lg border border-black/10 bg-paper px-3 font-normal outline-none focus:ring-4 focus:ring-sea/20"
+                          className="h-10 rounded-lg border border-slate-200 bg-paper px-3 text-sm font-normal text-slate-900 outline-none focus:ring-4 focus:ring-sea/20"
                           onChange={(event) => {
-                            const product = costCenterProductRows.find(
-                              (currentProduct) =>
-                                currentProduct.sku === event.target.value
-                            );
-                            const option = productOptions.find(
-                              (currentProduct) =>
-                                currentProduct.sku === event.target.value
-                            );
-
-                            if (product) {
-                              selectProductForCalculator(product);
-                              return;
-                            }
-
-                            if (option) {
-                              selectSalesProductForCalculator(option);
-                            }
+                            const product = costCenterProductRows.find(p => p.sku === event.target.value);
+                            const option = productOptions.find(p => p.sku === event.target.value);
+                            if (product) { selectProductForCalculator(product); return; }
+                            if (option) { selectSalesProductForCalculator(option); }
                           }}
                           value={calculatorForm.sku}
                         >
                           {productOptions.map((product) => (
-                            <option key={product.sku} value={product.sku}>
-                              {product.sku}
-                            </option>
+                            <option key={product.sku} value={product.sku}>{product.sku}</option>
                           ))}
                         </select>
                       </label>
-
-                      <label className="grid gap-1 text-sm font-semibold md:col-span-2">
+                      <label className="grid gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-500 sm:col-span-2">
                         Produto
                         <input
-                          className="h-10 rounded-lg border border-black/10 bg-paper px-3 font-normal outline-none focus:ring-4 focus:ring-sea/20"
-                          onChange={(event) =>
-                            setCalculatorForm((current) => ({
-                              ...current,
-                              name: event.target.value
-                            }))
-                          }
-                          placeholder="Titulo do produto"
+                          className="h-10 rounded-lg border border-slate-200 bg-paper px-3 text-sm font-normal outline-none focus:ring-4 focus:ring-sea/20"
+                          onChange={(e) => setCalculatorForm(c => ({ ...c, name: e.target.value }))}
+                          placeholder="Título do produto"
                           value={calculatorForm.name}
                         />
                       </label>
                     </div>
 
+                    {/* Marketplace preset */}
+                    <div>
+                      <p className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">Marketplace</p>
+                      <div className="flex flex-wrap gap-2">
+                        {MARKETPLACE_PRESETS.map((preset) => (
+                          <button
+                            className={`h-8 rounded-lg px-3 text-xs font-bold ring-1 transition ${
+                              selectedPreset === preset.id
+                                ? "bg-slate-900 text-white ring-slate-900"
+                                : "bg-white text-slate-600 ring-slate-200 hover:bg-slate-50"
+                            }`}
+                            key={preset.id}
+                            onClick={() => {
+                              setSelectedPreset(preset.id);
+                              if (preset.id !== "custom") {
+                                setCalculatorForm(c => ({
+                                  ...c,
+                                  commissionPercentage: String(preset.commission),
+                                  fixedFee: String(preset.fixedFee)
+                                }));
+                              }
+                            }}
+                            title={preset.hint}
+                            type="button"
+                          >
+                            {preset.label}
+                          </button>
+                        ))}
+                      </div>
+                      {MARKETPLACE_PRESETS.find(p => p.id === selectedPreset)?.hint && (
+                        <p className="mt-1.5 text-xs text-amber-600">
+                          💡 {MARKETPLACE_PRESETS.find(p => p.id === selectedPreset)?.hint}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Modo de cálculo */}
                     <div className="flex flex-wrap gap-2">
-                      {[
-                        ["margin", "Calcular margem"],
-                        ["price", "Preco por margem"],
-                        ["fixedProfit", "Preco por lucro"]
-                      ].map(([mode, label]) => (
+                      {([
+                        ["margin",      "Calcular margem"],
+                        ["price",       "Preço por margem"],
+                        ["fixedProfit", "Preço por lucro"]
+                      ] as const).map(([mode, label]) => (
                         <button
-                          className={`h-9 rounded-lg px-3 text-sm font-bold ring-1 ${
+                          className={`h-9 rounded-lg px-3 text-sm font-bold ring-1 transition ${
                             calculatorMode === mode
-                              ? "bg-ink text-white ring-ink"
+                              ? "bg-sea text-white ring-sea"
                               : "bg-paper text-ink ring-black/10 hover:bg-black/[0.03]"
                           }`}
                           key={mode}
-                          onClick={() => setCalculatorMode(mode as CostCalculatorMode)}
+                          onClick={() => setCalculatorMode(mode)}
                           type="button"
                         >
                           {label}
@@ -9716,80 +9802,74 @@ export function DashmarketDashboard() {
                       ))}
                     </div>
 
-                    <div className="grid gap-3 md:grid-cols-4">
-                      {[
-                        ["productCost", "Custo produto", "0,00"],
-                        ["sellingPrice", "Preco venda", "0,00"],
-                        ["commissionPercentage", "Comissao (%)", "16,00"],
-                        ["fixedFee", "Tarifa fixa", "0,00"],
-                        ["shippingCost", "Frete vendedor", "0,00"],
-                        ["packagingCost", "Embalagem", "0,00"],
-                        ["collectionCost", "Coleta", "0,00"],
-                        ["storageCost", "Armazenagem", "0,00"],
-                        ["operationalCost", "Operacional", "0,00"],
-                        ["taxPercentage", "Imposto (%)", "0,00"],
-                        ["adTacosPercentage", "Investimento ADS - TACOS manual (%)", "8,00"],
-                        ["promotionCredit", "Credito promocao", "0,00"],
-                        ["validFrom", "Vigencia", ""]
-                      ].map(([field, label, placeholder]) => (
-                        <label className="grid gap-1 text-sm font-semibold" key={field}>
+                    {/* Campos do formulário */}
+                    <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+                      {([
+                        ["productCost",                  "Custo produto (R$)",      "0,00",  "number"],
+                        ["sellingPrice",                 "Preço de venda (R$)",     "0,00",  "number"],
+                        ["commissionPercentage",         "Comissão (%)",            "16,00", "number"],
+                        ["fixedFee",                     "Tarifa fixa (R$)",        "0,00",  "number"],
+                        ["shippingCost",                 "Frete vendedor (R$)",     "0,00",  "number"],
+                        ["packagingCost",                "Embalagem (R$)",          "0,00",  "number"],
+                        ["collectionCost",               "Coleta (R$)",             "0,00",  "number"],
+                        ["storageCost",                  "Armazenagem (R$)",        "0,00",  "number"],
+                        ["operationalCost",              "Operacional (R$)",        "0,00",  "number"],
+                        ["taxPercentage",                "Imposto (%)",             "0,00",  "number"],
+                        ["adTacosPercentage",            "TACOS / ADS (%)",         "8,00",  "number"],
+                        ["affiliateCommissionPercentage","Comissão afiliado (%)",   "0,00",  "number"],
+                        ["promotionCredit",              "Crédito promoção (R$)",   "0,00",  "number"],
+                        ["validFrom",                    "Vigência",                "",      "date"]
+                      ] as const).map(([field, label, placeholder, type]) => (
+                        <label className="grid gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-500" key={field}>
                           {label}
                           <input
-                            className="h-10 rounded-lg border border-black/10 bg-paper px-3 font-normal outline-none focus:ring-4 focus:ring-sea/20"
+                            className="h-10 rounded-lg border border-slate-200 bg-paper px-3 text-sm font-normal text-slate-900 outline-none focus:ring-4 focus:ring-sea/20"
                             min="0"
-                            onChange={(event) =>
-                              setCalculatorForm((current) => ({
-                                ...current,
-                                [field]: event.target.value
-                              }))
-                            }
+                            onChange={(e) => {
+                              setCalculatorForm(c => ({ ...c, [field]: e.target.value }));
+                              // Auto-seleção Shopee por preço
+                              if (field === "sellingPrice" && selectedPreset.startsWith("shopee")) {
+                                const price = parseFloat(e.target.value.replace(",", ".")) || 0;
+                                const shopeePreset = getShopeePreset(price);
+                                const preset = MARKETPLACE_PRESETS.find(p => p.id === shopeePreset)!;
+                                setSelectedPreset(shopeePreset);
+                                setCalculatorForm(c => ({
+                                  ...c,
+                                  sellingPrice: e.target.value,
+                                  commissionPercentage: String(preset.commission),
+                                  fixedFee: String(preset.fixedFee)
+                                }));
+                              }
+                            }}
                             placeholder={placeholder}
                             step="0.01"
-                            type={field === "validFrom" ? "date" : "number"}
-                            value={
-                              calculatorForm[
-                                field as keyof CostCalculatorFormState
-                              ]
-                            }
+                            type={type}
+                            value={calculatorForm[field as keyof CostCalculatorFormState]}
                           />
                         </label>
                       ))}
 
                       {calculatorMode === "price" && (
-                        <label className="grid gap-1 text-sm font-semibold">
+                        <label className="grid gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-500">
                           Margem desejada (%)
                           <input
-                            className="h-10 rounded-lg border border-black/10 bg-paper px-3 font-normal outline-none focus:ring-4 focus:ring-sea/20"
-                            min="0"
-                            onChange={(event) =>
-                              setCalculatorForm((current) => ({
-                                ...current,
-                                desiredProfitMargin: event.target.value
-                              }))
-                            }
+                            className="h-10 rounded-lg border border-slate-200 bg-paper px-3 text-sm font-normal outline-none focus:ring-4 focus:ring-sea/20"
+                            min="0" step="0.01" type="number"
+                            onChange={(e) => setCalculatorForm(c => ({ ...c, desiredProfitMargin: e.target.value }))}
                             placeholder="15,00"
-                            step="0.01"
-                            type="number"
                             value={calculatorForm.desiredProfitMargin}
                           />
                         </label>
                       )}
 
                       {calculatorMode === "fixedProfit" && (
-                        <label className="grid gap-1 text-sm font-semibold">
-                          Lucro desejado
+                        <label className="grid gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-500">
+                          Lucro desejado (R$)
                           <input
-                            className="h-10 rounded-lg border border-black/10 bg-paper px-3 font-normal outline-none focus:ring-4 focus:ring-sea/20"
-                            min="0"
-                            onChange={(event) =>
-                              setCalculatorForm((current) => ({
-                                ...current,
-                                desiredFixedProfit: event.target.value
-                              }))
-                            }
+                            className="h-10 rounded-lg border border-slate-200 bg-paper px-3 text-sm font-normal outline-none focus:ring-4 focus:ring-sea/20"
+                            min="0" step="0.01" type="number"
+                            onChange={(e) => setCalculatorForm(c => ({ ...c, desiredFixedProfit: e.target.value }))}
                             placeholder="10,00"
-                            step="0.01"
-                            type="number"
                             value={calculatorForm.desiredFixedProfit}
                           />
                         </label>
@@ -9797,104 +9877,406 @@ export function DashmarketDashboard() {
                     </div>
                   </div>
 
-                  <section className="rounded-lg border border-black/10 bg-paper p-4">
-                    <h3 className="text-base font-bold">Resumo da calculadora</h3>
+                  {/* ── Painel de resultado ── */}
+                  <aside className="rounded-xl border border-slate-200 bg-slate-50/60 p-5">
+                    <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500">Resultado</h3>
                     {calculatorResult ? (
-                      <div className="mt-4 grid gap-2 text-sm">
-                        {[
-                          ["Preco de venda", calculatorResult.sellingPrice],
-                          ["Custo produto", -calculatorResult.productCost],
-                          ["Comissao", -calculatorResult.commission],
-                          ["Tarifa fixa", -calculatorResult.fixedFee],
-                          ["Frete vendedor", -calculatorResult.shippingCost],
-                          ["Embalagem", -calculatorResult.packagingCost],
-                          ["Coleta", -calculatorResult.collectionCost],
-                          ["Armazenagem", -calculatorResult.storageCost],
-                          ["Operacional", -calculatorResult.operationalCost],
-                          ["Impostos", -calculatorResult.taxes],
-                          [
-                            "Investimento ADS - TACOS",
-                            -calculatorResult.advertisingInvestment
-                          ],
-                          ["Credito promocao", calculatorResult.promotionCredit]
-                        ]
-                          .filter(([, value]) => Number(value) !== 0)
+                      <div className="mt-4 space-y-2 text-sm">
+                        {([
+                          ["Preço de venda",     calculatorResult.sellingPrice,           false],
+                          ["Custo produto",      -calculatorResult.productCost,           true],
+                          ["Comissão ML",        -calculatorResult.commission,            true],
+                          ["Tarifa fixa",        -calculatorResult.fixedFee,              true],
+                          ["Frete vendedor",     -calculatorResult.shippingCost,          true],
+                          ["Embalagem",          -calculatorResult.packagingCost,         true],
+                          ["Coleta",             -calculatorResult.collectionCost,        true],
+                          ["Armazenagem",        -calculatorResult.storageCost,           true],
+                          ["Operacional",        -calculatorResult.operationalCost,       true],
+                          ["Impostos",           -calculatorResult.taxes,                 true],
+                          ["TACOS / ADS",        -calculatorResult.advertisingInvestment, true],
+                          ["Com. afiliado",      -calculatorResult.affiliateCommission,   true],
+                          ["Crédito promoção",   calculatorResult.promotionCredit,        false],
+                        ] as [string, number, boolean][])
+                          .filter(([, value]) => value !== 0)
                           .map(([label, value]) => (
-                            <div className="flex justify-between gap-3" key={label}>
-                              <span className="text-black/60">{label}</span>
-                              <span className="font-semibold text-ink">
-                                {formatCurrency.format(Number(value))}
+                            <div className="flex justify-between gap-2" key={label}>
+                              <span className="text-slate-500">{label}</span>
+                              <span className={`font-semibold tabular-nums ${value < 0 ? "text-rose-600" : "text-slate-900"}`}>
+                                {formatCurrency.format(value)}
                               </span>
                             </div>
                           ))}
 
-                        <div className="mt-2 border-t border-black/10 pt-3">
-                          <div className="flex justify-between gap-3 font-bold">
-                            <span>Total de custos</span>
-                            <span>{formatCurrency.format(calculatorResult.totalCosts)}</span>
+                        <div className="mt-3 border-t border-slate-200 pt-3 space-y-2">
+                          <div className="flex justify-between gap-2 font-semibold text-slate-700">
+                            <span>Total custos</span>
+                            <span className="tabular-nums text-rose-600">{formatCurrency.format(-calculatorResult.totalCosts)}</span>
                           </div>
-                          <div
-                            className={`mt-2 flex justify-between gap-3 text-base font-bold ${
-                              calculatorResult.netProfit >= 0
-                                ? "text-sea"
-                                : "text-berry"
-                            }`}
-                          >
-                            <span>Lucro liquido</span>
-                            <span>{formatCurrency.format(calculatorResult.netProfit)}</span>
+                          <div className={`flex justify-between gap-2 text-base font-bold ${calculatorResult.netProfit >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
+                            <span>Lucro líquido</span>
+                            <span className="tabular-nums">{formatCurrency.format(calculatorResult.netProfit)}</span>
                           </div>
-                          <div
-                            className={`mt-1 flex justify-between gap-3 font-bold ${
-                              calculatorResult.profitMargin >= 0
-                                ? "text-sea"
-                                : "text-berry"
-                            }`}
-                          >
+                          <div className={`flex justify-between gap-2 font-bold ${calculatorResult.profitMargin >= 0.15 ? "text-emerald-600" : calculatorResult.profitMargin >= 0 ? "text-amber-600" : "text-rose-600"}`}>
                             <span>Margem</span>
-                            <span>{formatPercent(calculatorResult.profitMargin)}</span>
+                            <span className="tabular-nums">{formatPercent(calculatorResult.profitMargin)}</span>
+                          </div>
+                          <div className="flex justify-between gap-2 text-xs font-medium text-slate-500">
+                            <span>Markup</span>
+                            <span className="tabular-nums">{calculatorResult.markup.toFixed(1)}%</span>
                           </div>
                         </div>
                       </div>
                     ) : (
-                      <p className="mt-4 text-sm text-black/55">
-                        Informe custos e preço ou uma meta valida.
-                      </p>
+                      <p className="mt-4 text-sm text-slate-400">Informe custos e preço ou uma meta válida.</p>
                     )}
 
-                    <button
-                      className="mt-4 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-ink px-4 text-sm font-bold text-white hover:bg-black"
-                      disabled={
-                        isSavingCalculatorCosts || isResettingCalculatorCosts
-                      }
-                      onClick={saveCalculatorCosts}
-                      type="button"
-                    >
-                      <PackagePlus aria-hidden className="h-4 w-4" />
-                      {isSavingCalculatorCosts
-                        ? "Salvando"
-                        : "Aplicar custos internos"}
-                    </button>
-                    <button
-                      className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-berry/20 bg-berry/10 px-4 text-sm font-bold text-berry hover:bg-berry/15 disabled:cursor-not-allowed disabled:opacity-50"
-                      disabled={
-                        isSavingCalculatorCosts ||
-                        isResettingCalculatorCosts ||
-                        !hasCalculatorManagedCosts
-                      }
-                      onClick={resetCalculatedProducts}
-                      type="button"
-                    >
-                      <Trash2 aria-hidden className="h-4 w-4" />
-                      {isResettingCalculatorCosts
-                        ? "Limpando"
-                        : "Excluir produtos calculados"}
-                    </button>
-                    <p className="mt-2 text-xs text-black/55">
-                      SKUs vêm das vendas sincronizadas. Preço, comissão e frete vendedor usam as vendas; ADS/TACOS permanece manual.
+                    <div className="mt-5 space-y-2">
+                      <button
+                        className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 text-sm font-bold text-white transition hover:bg-black disabled:opacity-50"
+                        disabled={isSavingCalculatorCosts || isResettingCalculatorCosts}
+                        onClick={saveCalculatorCosts}
+                        type="button"
+                      >
+                        <PackagePlus aria-hidden className="h-4 w-4" />
+                        {isSavingCalculatorCosts ? "Salvando..." : "Aplicar custos internos"}
+                      </button>
+                      <button
+                        className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-4 text-sm font-bold text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
+                        disabled={isSavingCalculatorCosts || isResettingCalculatorCosts || !hasCalculatorManagedCosts}
+                        onClick={resetCalculatedProducts}
+                        type="button"
+                      >
+                        <Trash2 aria-hidden className="h-4 w-4" />
+                        {isResettingCalculatorCosts ? "Limpando..." : "Excluir produtos calculados"}
+                      </button>
+                    </div>
+                    <p className="mt-3 text-[11px] text-slate-400 leading-relaxed">
+                      SKUs das vendas sincronizadas. Preço, comissão e frete usam médias reais. TACOS permanece manual.
                     </p>
-                  </section>
+                  </aside>
                 </div>
               </section>
+              )}
+
+              {/* ── Alertas de Margem ── */}
+              {calculatorTab === "alerts" && (
+              <section className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+                <div className="flex items-center justify-between gap-4 border-b border-slate-200 bg-slate-50/50 px-5 py-4">
+                  <div>
+                    <h2 className="text-base font-bold text-slate-900">Alertas de Margem</h2>
+                    <p className="text-xs text-slate-500">Produtos abaixo do threshold mínimo com preço sugerido para recuperar a margem.</p>
+                  </div>
+                  <label className="flex items-center gap-2 text-xs font-bold text-slate-600">
+                    Threshold mínimo
+                    <input
+                      className="h-8 w-20 rounded-lg border border-slate-200 bg-paper px-2 text-sm outline-none focus:ring-2 focus:ring-sea/20"
+                      max="50" min="0" step="1" type="number"
+                      onChange={(e) => setAlertThreshold(Number(e.target.value))}
+                      value={alertThreshold}
+                    />
+                    <span>%</span>
+                  </label>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm">
+                    <thead className="border-b border-slate-200 bg-slate-50/50 text-xs font-bold uppercase tracking-wider text-slate-500">
+                      <tr>
+                        <th className="px-5 py-3">SKU / Produto</th>
+                        <th className="px-5 py-3 text-right">Preço médio</th>
+                        <th className="px-5 py-3 text-right">Custo</th>
+                        <th className="px-5 py-3 text-right">Margem atual</th>
+                        <th className="px-5 py-3 text-right">Preço sugerido</th>
+                        <th className="px-5 py-3 text-right">Delta</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {costCenterProductRows.length === 0 ? (
+                        <tr><td className="px-5 py-8 text-center text-slate-400" colSpan={6}>Nenhum produto calculado. Use a Calculadora e aplique os custos internos primeiro.</td></tr>
+                      ) : costCenterProductRows
+                          .filter(p => p.contributionMarginRate * 100 < alertThreshold)
+                          .sort((a, b) => a.contributionMarginRate - b.contributionMarginRate)
+                          .map(p => {
+                            const varPct = (p.advertisingTacosPercentage || 8) / 100;
+                            const fixedCost = p.productCost + p.packagingCost + p.operationalCost;
+                            const commPct = 0.16;
+                            const suggestedPrice = fixedCost / (1 - commPct - varPct - (alertThreshold / 100));
+                            const delta = suggestedPrice - p.averagePrice;
+                            return (
+                              <tr className="hover:bg-rose-50/40" key={p.sku}>
+                                <td className="px-5 py-3">
+                                  <p className="font-bold text-slate-900">{p.sku}</p>
+                                  <p className="text-xs text-slate-400 line-clamp-1">{p.title}</p>
+                                </td>
+                                <td className="px-5 py-3 text-right tabular-nums">{formatCurrency.format(p.averagePrice)}</td>
+                                <td className="px-5 py-3 text-right tabular-nums">{formatCurrency.format(fixedCost)}</td>
+                                <td className="px-5 py-3 text-right font-bold tabular-nums text-rose-600">{formatPercent(p.contributionMarginRate)}</td>
+                                <td className="px-5 py-3 text-right font-bold tabular-nums text-emerald-700">{suggestedPrice > 0 ? formatCurrency.format(suggestedPrice) : "—"}</td>
+                                <td className="px-5 py-3 text-right tabular-nums text-amber-600">+{suggestedPrice > 0 ? formatCurrency.format(delta) : "—"}</td>
+                              </tr>
+                            );
+                          })}
+                      {costCenterProductRows.length > 0 && costCenterProductRows.filter(p => p.contributionMarginRate * 100 >= alertThreshold).length > 0 && (
+                        <>
+                          <tr className="bg-emerald-50/60">
+                            <td className="px-5 py-2 text-xs font-bold uppercase tracking-wider text-emerald-600" colSpan={6}>✓ Acima do threshold ({costCenterProductRows.filter(p => p.contributionMarginRate * 100 >= alertThreshold).length} SKUs)</td>
+                          </tr>
+                          {costCenterProductRows.filter(p => p.contributionMarginRate * 100 >= alertThreshold).map(p => (
+                            <tr className="hover:bg-emerald-50/30" key={p.sku}>
+                              <td className="px-5 py-3"><p className="font-semibold text-slate-700">{p.sku}</p></td>
+                              <td className="px-5 py-3 text-right tabular-nums text-slate-600">{formatCurrency.format(p.averagePrice)}</td>
+                              <td className="px-5 py-3 text-right tabular-nums text-slate-600">{formatCurrency.format(p.productCost + p.packagingCost + p.operationalCost)}</td>
+                              <td className="px-5 py-3 text-right font-bold tabular-nums text-emerald-600">{formatPercent(p.contributionMarginRate)}</td>
+                              <td className="px-5 py-3 text-right text-slate-400">—</td>
+                              <td className="px-5 py-3 text-right text-slate-400">—</td>
+                            </tr>
+                          ))}
+                        </>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+              )}
+
+              {/* ── Simulador What-if ── */}
+              {calculatorTab === "simulator" && (
+              <section className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+                <div className="border-b border-slate-200 bg-slate-50/50 px-5 py-4">
+                  <h2 className="text-base font-bold text-slate-900">Simulador de Cenários</h2>
+                  <p className="text-xs text-slate-500">Ajuste variáveis e veja o impacto na margem em tempo real.</p>
+                </div>
+                <div className="p-5 space-y-5">
+                  <label className="grid gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-500 max-w-xs">
+                    Produto
+                    <select
+                      className="h-10 rounded-lg border border-slate-200 bg-paper px-3 text-sm outline-none focus:ring-4 focus:ring-sea/20"
+                      onChange={(e) => setWhatIfSku(e.target.value)}
+                      value={whatIfSku}
+                    >
+                      <option value="">Selecione um produto...</option>
+                      {costCenterProductRows.map(p => (
+                        <option key={p.sku} value={p.sku}>{p.sku} — {p.title}</option>
+                      ))}
+                    </select>
+                  </label>
+                  {whatIfSku && (() => {
+                    const base = costCenterProductRows.find(p => p.sku === whatIfSku);
+                    if (!base) return null;
+                    const simPrice = base.averagePrice * (1 + whatIfSliders.price / 100);
+                    const simCommPct = 0.16 + whatIfSliders.commission / 100;
+                    const simShipping = base.productCost * 0.1 + whatIfSliders.shipping;
+                    const simTaxPct = (base.taxPercentage || 0) / 100 + whatIfSliders.tax / 100;
+                    const simCosts = base.productCost + base.packagingCost + base.operationalCost + simShipping + simPrice * simCommPct + simPrice * simTaxPct + simPrice * (base.advertisingTacosPercentage / 100);
+                    const simMargin = simPrice > 0 ? (simPrice - simCosts) / simPrice : 0;
+                    const origMargin = base.contributionMarginRate;
+                    const deltaMargin = simMargin - origMargin;
+                    return (
+                      <div className="grid gap-6 xl:grid-cols-2">
+                        <div className="space-y-4">
+                          {([
+                            ["price",      "Preço",      -50, 50,  0, "%"],
+                            ["commission", "Comissão",   -10, 10,  0, "pp"],
+                            ["shipping",   "Frete",      -20, 20,  0, "R$"],
+                            ["tax",        "Imposto",    -10, 10,  0, "pp"]
+                          ] as const).map(([key, label, min, max, , unit]) => (
+                            <div key={key}>
+                              <div className="mb-1 flex justify-between text-xs font-semibold text-slate-600">
+                                <span>{label}</span>
+                                <span className={whatIfSliders[key] > 0 ? "text-emerald-600" : whatIfSliders[key] < 0 ? "text-rose-600" : "text-slate-400"}>
+                                  {whatIfSliders[key] > 0 ? "+" : ""}{whatIfSliders[key].toFixed(1)} {unit}
+                                </span>
+                              </div>
+                              <input
+                                className="w-full accent-slate-800"
+                                max={max} min={min} step="0.5" type="range"
+                                onChange={(e) => setWhatIfSliders(s => ({ ...s, [key]: Number(e.target.value) }))}
+                                value={whatIfSliders[key]}
+                              />
+                            </div>
+                          ))}
+                        </div>
+                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-5">
+                          <p className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3">Comparativo</p>
+                          <div className="space-y-3">
+                            {([
+                              ["Preço",   base.averagePrice, simPrice,  "currency"],
+                              ["Margem",  origMargin,        simMargin, "percent"],
+                              ["Lucro",   base.averagePrice * origMargin, simPrice * simMargin, "currency"]
+                            ] as [string, number, number, string][]).map(([label, orig, sim, fmt]) => (
+                              <div key={label} className="flex items-center justify-between gap-4">
+                                <span className="text-sm text-slate-500">{label}</span>
+                                <div className="flex items-center gap-3 text-sm font-semibold tabular-nums">
+                                  <span className="text-slate-400">{fmt === "currency" ? formatCurrency.format(orig) : formatPercent(orig)}</span>
+                                  <span className="text-slate-300">→</span>
+                                  <span className={sim > orig ? "text-emerald-600" : sim < orig ? "text-rose-600" : "text-slate-700"}>{fmt === "currency" ? formatCurrency.format(sim) : formatPercent(sim)}</span>
+                                </div>
+                              </div>
+                            ))}
+                            <div className={`mt-2 rounded-lg px-3 py-2 text-sm font-bold text-center ${deltaMargin >= 0 ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"}`}>
+                              {deltaMargin >= 0 ? "▲" : "▼"} {Math.abs(deltaMargin * 100).toFixed(1)}pp na margem
+                            </div>
+                          </div>
+                          <button className="mt-4 w-full text-xs text-slate-400 hover:text-slate-600" onClick={() => setWhatIfSliders({ price: 0, commission: 0, shipping: 0, tax: 0 })} type="button">
+                            Resetar sliders
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                  {!whatIfSku && <p className="text-sm text-slate-400">Selecione um produto para começar a simulação.</p>}
+                </div>
+              </section>
+              )}
+
+              {/* ── Simulador de Promoção ── */}
+              {calculatorTab === "promo" && (
+              <section className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+                <div className="border-b border-slate-200 bg-slate-50/50 px-5 py-4">
+                  <h2 className="text-base font-bold text-slate-900">Simulador de Promoção</h2>
+                  <p className="text-xs text-slate-500">Veja o impacto de um desconto na margem antes de aplicar.</p>
+                </div>
+                <div className="p-5 space-y-5">
+                  <div className="flex flex-wrap gap-4 items-end">
+                    <label className="grid gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-500">
+                      Produto
+                      <select className="h-10 rounded-lg border border-slate-200 bg-paper px-3 text-sm outline-none focus:ring-4 focus:ring-sea/20 min-w-[200px]"
+                        onChange={(e) => setWhatIfSku(e.target.value)} value={whatIfSku}>
+                        <option value="">Selecione...</option>
+                        {costCenterProductRows.map(p => <option key={p.sku} value={p.sku}>{p.sku}</option>)}
+                      </select>
+                    </label>
+                    <div className="flex gap-2 items-end">
+                      <label className="grid gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-500">
+                        Tipo
+                        <select className="h-10 rounded-lg border border-slate-200 bg-paper px-3 text-sm outline-none focus:ring-4 focus:ring-sea/20"
+                          onChange={(e) => setPromoDiscount(d => ({ ...d, type: e.target.value as "percent" | "fixed" }))} value={promoDiscount.type}>
+                          <option value="percent">Percentual (%)</option>
+                          <option value="fixed">Valor fixo (R$)</option>
+                        </select>
+                      </label>
+                      <label className="grid gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-500">
+                        Desconto
+                        <input className="h-10 w-28 rounded-lg border border-slate-200 bg-paper px-3 text-sm outline-none focus:ring-4 focus:ring-sea/20"
+                          min="0" step="0.01" type="number"
+                          onChange={(e) => setPromoDiscount(d => ({ ...d, value: e.target.value }))}
+                          placeholder="10" value={promoDiscount.value} />
+                      </label>
+                    </div>
+                  </div>
+                  {whatIfSku && promoDiscount.value && (() => {
+                    const base = costCenterProductRows.find(p => p.sku === whatIfSku);
+                    if (!base) return null;
+                    const discountValue = parseFloat(promoDiscount.value.replace(",", ".")) || 0;
+                    const promoPrice = promoDiscount.type === "percent"
+                      ? base.averagePrice * (1 - discountValue / 100)
+                      : base.averagePrice - discountValue;
+                    const fixedCosts = base.productCost + base.packagingCost + base.operationalCost;
+                    const origCosts = fixedCosts + base.averagePrice * 0.16 + base.averagePrice * (base.advertisingTacosPercentage / 100);
+                    const promoCosts = fixedCosts + promoPrice * 0.16 + promoPrice * (base.advertisingTacosPercentage / 100);
+                    const origProfit = base.averagePrice - origCosts;
+                    const promoProfit = promoPrice - promoCosts;
+                    const origMargin = base.averagePrice > 0 ? origProfit / base.averagePrice : 0;
+                    const promoMargin = promoPrice > 0 ? promoProfit / promoPrice : 0;
+                    return (
+                      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                        {([
+                          ["Preço",     base.averagePrice, promoPrice,  "currency"],
+                          ["Lucro",     origProfit,        promoProfit, "currency"],
+                          ["Margem",    origMargin,        promoMargin, "percent"],
+                          ["Desconto",  0,                 discountValue * (promoDiscount.type === "percent" ? base.averagePrice / 100 : 1), "currency"]
+                        ] as [string, number, number, string][]).map(([label, orig, sim, fmt]) => {
+                          const isNeg = sim < orig;
+                          return (
+                            <div key={label} className={`rounded-xl p-4 ring-1 ${isNeg ? "bg-rose-50 ring-rose-200" : "bg-emerald-50 ring-emerald-200"}`}>
+                              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">{label}</p>
+                              <p className={`mt-1 text-xl font-bold tabular-nums ${isNeg ? "text-rose-700" : "text-emerald-700"}`}>
+                                {fmt === "currency" ? formatCurrency.format(sim) : formatPercent(sim)}
+                              </p>
+                              <p className="mt-0.5 text-xs text-slate-400">
+                                {isNeg ? "▼" : "▲"} vs {fmt === "currency" ? formatCurrency.format(Math.abs(sim - orig)) : `${Math.abs((sim - orig) * 100).toFixed(1)}pp`}
+                              </p>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
+                </div>
+              </section>
+              )}
+
+              {/* ── Ranking Pareto ── */}
+              {calculatorTab === "pareto" && (
+              <section className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+                <div className="border-b border-slate-200 bg-slate-50/50 px-5 py-4">
+                  <h2 className="text-base font-bold text-slate-900">Ranking Pareto</h2>
+                  <p className="text-xs text-slate-500">Produtos ordenados por contribuição de lucro. Os 20% do topo geralmente representam 80% do resultado.</p>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm">
+                    <thead className="border-b border-slate-200 bg-slate-50/50 text-xs font-bold uppercase tracking-wider text-slate-500">
+                      <tr>
+                        <th className="px-5 py-3">#</th>
+                        <th className="px-5 py-3">SKU / Produto</th>
+                        <th className="px-5 py-3 text-right">Receita total</th>
+                        <th className="px-5 py-3 text-right">Margem</th>
+                        <th className="px-5 py-3 text-right">Lucro estimado</th>
+                        <th className="px-5 py-3 text-right">Contribuição acum.</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {costCenterProductRows.length === 0 ? (
+                        <tr><td className="px-5 py-8 text-center text-slate-400" colSpan={6}>Nenhum produto calculado ainda.</td></tr>
+                      ) : (() => {
+                        const ranked = [...costCenterProductRows]
+                          .map(p => ({ ...p, estimatedProfit: p.grossRevenue * p.contributionMarginRate }))
+                          .sort((a, b) => b.estimatedProfit - a.estimatedProfit);
+                        const totalProfit = ranked.reduce((s, p) => s + p.estimatedProfit, 0);
+                        let cumulative = 0;
+                        return ranked.map((p, i) => {
+                          cumulative += p.estimatedProfit;
+                          const cumulativePct = totalProfit > 0 ? cumulative / totalProfit : 0;
+                          const isTop20 = i < Math.ceil(ranked.length * 0.2);
+                          return (
+                            <tr className={`hover:bg-slate-50 ${isTop20 ? "border-l-2 border-l-emerald-400" : ""}`} key={p.sku}>
+                              <td className="px-5 py-3 font-bold text-slate-400">#{i + 1}</td>
+                              <td className="px-5 py-3">
+                                <p className="font-bold text-slate-900">{p.sku}</p>
+                                <p className="text-xs text-slate-400 line-clamp-1">{p.title}</p>
+                              </td>
+                              <td className="px-5 py-3 text-right tabular-nums">{formatCurrency.format(p.grossRevenue)}</td>
+                              <td className={`px-5 py-3 text-right font-bold tabular-nums ${p.contributionMarginRate >= 0.15 ? "text-emerald-600" : p.contributionMarginRate >= 0 ? "text-amber-600" : "text-rose-600"}`}>
+                                {formatPercent(p.contributionMarginRate)}
+                              </td>
+                              <td className="px-5 py-3 text-right font-semibold tabular-nums">{formatCurrency.format(p.estimatedProfit)}</td>
+                              <td className="px-5 py-3 text-right">
+                                <div className="flex items-center justify-end gap-2">
+                                  <div className="h-1.5 w-20 rounded-full bg-slate-100 overflow-hidden">
+                                    <div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${cumulativePct * 100}%` }} />
+                                  </div>
+                                  <span className="text-xs font-semibold tabular-nums text-slate-600">{formatPercent(cumulativePct)}</span>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        });
+                      })()}
+                    </tbody>
+                    {costCenterProductRows.length > 0 && (
+                      <tfoot className="border-t-2 border-slate-200 bg-slate-50">
+                        <tr>
+                          <td colSpan={2} className="px-5 py-3 text-xs font-bold uppercase tracking-wider text-slate-500">Total portfólio</td>
+                          <td className="px-5 py-3 text-right font-bold tabular-nums">{formatCurrency.format(costCenterProductRows.reduce((s, p) => s + p.grossRevenue, 0))}</td>
+                          <td className="px-5 py-3 text-right font-bold tabular-nums">{formatPercent(costCenterProductRows.reduce((s, p) => s + p.contributionMarginRate, 0) / costCenterProductRows.length)}</td>
+                          <td className="px-5 py-3 text-right font-bold tabular-nums">{formatCurrency.format(costCenterProductRows.reduce((s, p) => s + p.grossRevenue * p.contributionMarginRate, 0))}</td>
+                          <td className="px-5 py-3 text-right font-bold text-emerald-600">100%</td>
+                        </tr>
+                      </tfoot>
+                    )}
+                  </table>
+                </div>
+              </section>
+              )}
 
               <section className="rounded-lg border border-black/10 bg-white shadow-sm">
                 <div className="flex flex-col gap-3 border-b border-black/10 p-4 lg:flex-row lg:items-center lg:justify-between">
