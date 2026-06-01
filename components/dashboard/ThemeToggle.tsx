@@ -13,12 +13,14 @@ type ThemeToggleProps = {
 const STORAGE_KEY = "dashmarket-theme";
 
 function readStoredTheme(): ThemeName {
-  if (typeof window === "undefined") return "light";
+  if (typeof window === "undefined") return "dark";
 
   try {
-    return window.localStorage.getItem(STORAGE_KEY) === "dark" ? "dark" : "light";
+    const stored = window.localStorage.getItem(STORAGE_KEY);
+    // Padrão é dark (igual ao script anti-flash do layout)
+    return stored === "light" ? "light" : "dark";
   } catch {
-    return "light";
+    return "dark";
   }
 }
 
@@ -35,7 +37,7 @@ export function ThemeToggle({
   className = "",
   collapseLabelOnLarge = false
 }: ThemeToggleProps) {
-  const [theme, setTheme] = useState<ThemeName>("light");
+  const [theme, setTheme] = useState<ThemeName>("dark");
 
   useEffect(() => {
     const storedTheme = readStoredTheme();
