@@ -14,6 +14,7 @@ import {
   Megaphone,
   PackageCheck,
   PackagePlus,
+  Scale,
   ShieldAlert,
   Target,
   WalletCards
@@ -31,6 +32,7 @@ export type ViewKey =
   | "ads_analysis"
   | "pos_venda"
   | "conector"
+  | "conciliacao"
   | "financeiro_empresa"
   | "financeiro_pessoal";
 
@@ -47,7 +49,8 @@ export const views: Array<{ key: ViewKey; label: string; icon: typeof BarChart3 
   { key: "ads", label: "Publicidade", icon: Megaphone },
   { key: "ads_analysis", label: "Análise de Anúncios", icon: Target },
   { key: "pos_venda", label: "Pós-venda", icon: ShieldAlert },
-  { key: "conector", label: "Conector ativo", icon: Cable }
+  { key: "conector", label: "Conector ativo", icon: Cable },
+  { key: "conciliacao", label: "Conciliação", icon: Scale }
 ];
 
 const groups: Array<{ label: string; keys: ViewKey[] }> = [
@@ -55,7 +58,7 @@ const groups: Array<{ label: string; keys: ViewKey[] }> = [
   { label: "Operações", keys: ["produtos", "vendas", "custos", "estoque", "estoque_fisico"] },
   { label: "Marketing", keys: ["ads", "ads_analysis"] },
   { label: "Pós-venda", keys: ["pos_venda"] },
-  { label: "Financeiro", keys: ["financeiro_empresa", "financeiro_pessoal"] },
+  { label: "Financeiro", keys: ["financeiro_empresa", "financeiro_pessoal", "conciliacao"] },
   { label: "Integrações", keys: ["conector"] }
 ];
 

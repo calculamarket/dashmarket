@@ -45,6 +45,7 @@ import { ThemeToggle } from "@/components/dashboard/ThemeToggle";
 import { Sidebar, type ViewKey } from "@/components/dashboard/Sidebar";
 import { KpiCard, KpiSection } from "@/components/dashboard/KpiSection";
 import { InventoryTable } from "@/components/dashboard/InventoryTable";
+import { ReconciliationView } from "@/components/dashboard/ReconciliationView";
 
 type SupabaseStatus = "checking" | "demo" | "connected" | "error";
 type FinanceEntryType = "income" | "expense";
@@ -1226,6 +1227,11 @@ const formatCurrency = new Intl.NumberFormat("pt-BR", {
 });
 
 const formatNumber = new Intl.NumberFormat("pt-BR");
+const reconciliationDateFormatter = new Intl.DateTimeFormat("pt-BR", {
+  day: "2-digit",
+  month: "2-digit",
+  year: "numeric"
+});
 
 const SALES_DETAIL_LIMIT = 50000;
 const SAO_PAULO_TIME_ZONE = "America/Sao_Paulo";
@@ -7212,6 +7218,15 @@ export function DashmarketDashboard() {
                 </section>
               </div>
             </section>
+          )}
+
+          {activeView === "conciliacao" && (
+            <ReconciliationView
+              organizationId={organization?.id ?? null}
+              supabaseClient={supabaseClient}
+              formatCurrency={formatCurrency}
+              formatDate={reconciliationDateFormatter}
+            />
           )}
 
           {activeView === "ia" && (
