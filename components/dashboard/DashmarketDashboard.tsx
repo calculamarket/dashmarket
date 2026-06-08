@@ -6206,74 +6206,61 @@ export function DashmarketDashboard() {
   }, [activeView]);
 
   return (
-    <main className="min-h-screen bg-slate-50 text-slate-900">
-      <header className="sticky top-0 z-30 border-b border-slate-200 bg-white shadow-sm">
-        <div className="flex flex-col gap-4 px-4 py-4 sm:px-6 lg:px-8">
-          <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-            <div className="flex items-center gap-3">
-              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-slate-900 text-sm font-black text-white">
-                DM
-              </span>
-              <div>
-                <p className="text-xl font-bold tracking-tight text-slate-900">DASHMARKET</p>
-                <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Intelligence & Growth</p>
-              </div>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-3">
-              <ThemeToggle />
-              {supabaseStatus === "connected" ? (
-                <button
-                  aria-label="Sair"
-                  className="inline-flex h-10 items-center gap-2 rounded-xl bg-slate-100 px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-200"
-                  onClick={signOut}
-                  title="Sair"
-                  type="button"
-                >
-                  <LogOut aria-hidden className="h-4 w-4 shrink-0" />
-                  <span>Sair</span>
-                </button>
-              ) : (
-                <Link
-                  aria-label="Entrar"
-                  className="inline-flex h-10 items-center gap-2 rounded-xl bg-slate-900 px-4 text-sm font-semibold text-white transition hover:bg-slate-800 shadow-sm"
-                  href="/login"
-                  title="Entrar"
-                >
-                  <ShieldCheck aria-hidden className="h-4 w-4 shrink-0" />
-                  <span>Entrar</span>
-                </Link>
-              )}
-            </div>
-          </div>
-
-          <Sidebar
-            activeView={activeView}
-            badges={{ pos_venda: claimsData ? (claimsData.summary.urgent + claimsData.summary.expired + (questionsData?.total ?? 0)) : undefined }}
-            onViewChange={async (view) => {
-              setActiveView(view);
-              if (view === "pos_venda" && organization && supabaseClient && !reputation && !questionsData && !claimsData) {
-                setIsLoadingReputation(true);
-                setIsLoadingQuestions(true);
-                setIsLoadingClaims(true);
-                try {
-                  const { data: sessionData } = await supabaseClient.auth.getSession();
-                  const accessToken = sessionData.session?.access_token;
-                  if (accessToken) {
-                    await loadPosVenda(organization.id, accessToken);
-                  }
-                } finally {
-                  setIsLoadingReputation(false);
-                  setIsLoadingQuestions(false);
-                  setIsLoadingClaims(false);
-                }
+    <div className="flex min-h-screen bg-slate-50 text-slate-900">
+      <Sidebar
+        activeView={activeView}
+        badges={{ pos_venda: claimsData ? (claimsData.summary.urgent + claimsData.summary.expired + (questionsData?.total ?? 0)) : undefined }}
+        onViewChange={async (view) => {
+          setActiveView(view);
+          if (view === "pos_venda" && organization && supabaseClient && !reputation && !questionsData && !claimsData) {
+            setIsLoadingReputation(true);
+            setIsLoadingQuestions(true);
+            setIsLoadingClaims(true);
+            try {
+              const { data: sessionData } = await supabaseClient.auth.getSession();
+              const accessToken = sessionData.session?.access_token;
+              if (accessToken) {
+                await loadPosVenda(organization.id, accessToken);
               }
-            }}
-          />
-        </div>
-      </header>
+            } finally {
+              setIsLoadingReputation(false);
+              setIsLoadingQuestions(false);
+              setIsLoadingClaims(false);
+            }
+          }
+        }}
+      />
 
-      <section className="min-w-0 px-4 py-8 sm:px-6 lg:px-8">
+      <main className="flex min-w-0 flex-1 flex-col">
+        <header className="sticky top-0 z-30 border-b border-slate-200 bg-white shadow-sm">
+          <div className="flex items-center justify-end gap-3 px-4 py-3 sm:px-6 lg:px-8">
+            <ThemeToggle />
+            {supabaseStatus === "connected" ? (
+              <button
+                aria-label="Sair"
+                className="inline-flex h-10 items-center gap-2 rounded-xl bg-slate-100 px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-200"
+                onClick={signOut}
+                title="Sair"
+                type="button"
+              >
+                <LogOut aria-hidden className="h-4 w-4 shrink-0" />
+                <span>Sair</span>
+              </button>
+            ) : (
+              <Link
+                aria-label="Entrar"
+                className="inline-flex h-10 items-center gap-2 rounded-xl bg-slate-900 px-4 text-sm font-semibold text-white transition hover:bg-slate-800 shadow-sm"
+                href="/login"
+                title="Entrar"
+              >
+                <ShieldCheck aria-hidden className="h-4 w-4 shrink-0" />
+                <span>Entrar</span>
+              </Link>
+            )}
+          </div>
+        </header>
+
+        <section className="min-w-0 px-4 py-8 sm:px-6 lg:px-8">
         {activeView === "principal" && (
           <div className="space-y-8">
             <header className="flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
@@ -11216,6 +11203,7 @@ export function DashmarketDashboard() {
             </span>
           </footer>
         </section>
-    </main>
+      </main>
+    </div>
   );
 }
