@@ -7,6 +7,7 @@ import {
   FileSpreadsheet,
   RefreshCw,
   Scale,
+  Trash2,
   UploadCloud,
   XCircle
 } from "lucide-react";
@@ -71,6 +72,7 @@ export function ReconciliationView({
   const [lastBatch, setLastBatch] = useState<BatchSummary | null>(null);
   const [rows, setRows] = useState<ImportRow[]>([]);
   const [filter, setFilter] = useState<RowFilter>("all");
+  const [deletingBatchId, setDeletingBatchId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const getAccessToken = useCallback(async () => {
@@ -144,6 +146,47 @@ export function ReconciliationView({
       }
     },
     [organizationId, supabaseClient, getAccessToken, loadHistory]
+  );
+
+  const handleDeleteBatch = useCallback(
+    async (batch: BatchSummary) => {
+      if (!organizationId || !supabaseClient) return;
+      const confirmed = window.confirm(
+        `Excluir a importação "${batch.fileName}"? Essa ação remove o lote e todas as linhas conciliadas associadas a ele.`
+      );
+      if (!confirmed) return;
+
+      setDeletingBatchId(batch.id);
+      setError(null);
+      try {
+        const accessToken = await getAccessToken();
+        if (!accessToken) throw new Error("Sessão expirada. Faça login novamente.");
+
+        const response = await fetch(
+          `/api/marketplaces/mercadopago/reconciliation/import?organizationId=${encodeURIComponent(
+            organizationId
+          )}&batchId=${encodeURIComponent(batch.id)}`,
+          {
+            method: "DELETE",
+            headers: { Authorization: `Bearer ${accessToken}` }
+          }
+        );
+        const payload = (await response.json()) as { deleted?: boolean; error?: string };
+        if (!response.ok) throw new Error(payload.error ?? "Não foi possível excluir a importação.");
+
+        setBatches((prev) => prev.filter((item) => item.id !== batch.id));
+        if (lastBatch?.id === batch.id) {
+          setLastBatch(null);
+          setRows([]);
+          setFilter("all");
+        }
+      } catch (deleteError) {
+        setError(deleteError instanceof Error ? deleteError.message : "Não foi possível excluir a importação.");
+      } finally {
+        setDeletingBatchId(null);
+      }
+    },
+    [organizationId, supabaseClient, getAccessToken, lastBatch]
   );
 
   const visibleRows = filter === "all" ? rows : rows.filter((row) => row.matchStatus === filter);
@@ -359,6 +402,7 @@ export function ReconciliationView({
                   <th className="px-4 py-3 text-right">Divergentes</th>
                   <th className="px-4 py-3 text-right">Sem correspondência</th>
                   <th className="px-4 py-3 text-right">Valor líquido</th>
+                  <th className="px-4 py-3 text-right">Ações</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -374,6 +418,23 @@ export function ReconciliationView({
                     <td className="px-4 py-3 text-right font-semibold text-rose-600">{batch.unmatchedRows}</td>
                     <td className="px-4 py-3 text-right text-slate-600">
                       {formatCurrency.format(batch.totalNetReceivedAmount)}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <button
+                        aria-label={`Excluir importação ${batch.fileName}`}
+                        className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-2.5 text-xs font-semibold text-rose-600 shadow-sm transition hover:bg-rose-100 disabled:opacity-50"
+                        disabled={deletingBatchId === batch.id}
+                        onClick={() => void handleDeleteBatch(batch)}
+                        title="Excluir importação"
+                        type="button"
+                      >
+                        {deletingBatchId === batch.id ? (
+                          <RefreshCw aria-hidden className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Trash2 aria-hidden className="h-3.5 w-3.5" />
+                        )}
+                        Excluir
+                      </button>
                     </td>
                   </tr>
                 ))}

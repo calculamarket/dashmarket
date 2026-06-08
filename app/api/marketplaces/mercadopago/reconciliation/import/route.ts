@@ -474,3 +474,78 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
+
+export async function DELETE(request: Request) {
+  try {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+    if (!supabaseUrl || !serviceRoleKey) {
+      return NextResponse.json(
+        { error: "Configuração do Supabase ausente no servidor." },
+        { status: 500 }
+      );
+    }
+
+    const authorization = request.headers.get("authorization");
+    const token = authorization?.replace(/^Bearer\s+/i, "");
+    const { searchParams } = new URL(request.url);
+    const organizationId = searchParams.get("organizationId");
+    const batchId = searchParams.get("batchId");
+
+    if (!token || !organizationId || !batchId) {
+      return NextResponse.json(
+        { error: "Sessão, empresa e lote são obrigatórios." },
+        { status: 401 }
+      );
+    }
+
+    const supabase = createClient(supabaseUrl, serviceRoleKey, {
+      auth: { persistSession: false }
+    });
+
+    const { data: userData, error: userError } = await supabase.auth.getUser(token);
+    if (userError || !userData.user) {
+      return NextResponse.json({ error: "Sessão inválida." }, { status: 401 });
+    }
+
+    const { data: membership, error: membershipError } = await supabase
+      .from("organization_members")
+      .select("organization_id")
+      .eq("organization_id", organizationId)
+      .eq("user_id", userData.user.id)
+      .maybeSingle();
+
+    if (membershipError) throw membershipError;
+    if (!membership) {
+      return NextResponse.json({ error: "Sem acesso a esta empresa." }, { status: 403 });
+    }
+
+    const { data: batch, error: batchError } = await supabase
+      .from("mp_reconciliation_batches")
+      .select("id")
+      .eq("id", batchId)
+      .eq("organization_id", organizationId)
+      .maybeSingle();
+
+    if (batchError) throw batchError;
+    if (!batch) {
+      return NextResponse.json({ error: "Importação não encontrada." }, { status: 404 });
+    }
+
+    // mp_payment_imports possui ON DELETE CASCADE referenciando o lote, então
+    // remover o lote já remove as linhas associadas.
+    const { error: deleteError } = await supabase
+      .from("mp_reconciliation_batches")
+      .delete()
+      .eq("id", batchId)
+      .eq("organization_id", organizationId);
+
+    if (deleteError) throw deleteError;
+
+    return NextResponse.json({ deleted: true, batchId });
+  } catch (error) {
+    const message = extractErrorMessage(error, "Erro ao excluir a importação.");
+    console.error("[mercadopago/reconciliation/import] DELETE falhou:", error);
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
