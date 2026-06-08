@@ -2,6 +2,19 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import * as XLSX from "xlsx";
 
+function extractErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === "object") {
+    const candidate = error as { message?: unknown; error_description?: unknown; details?: unknown };
+    if (typeof candidate.message === "string" && candidate.message.trim()) return candidate.message;
+    if (typeof candidate.error_description === "string" && candidate.error_description.trim()) {
+      return candidate.error_description;
+    }
+    if (typeof candidate.details === "string" && candidate.details.trim()) return candidate.details;
+  }
+  return fallback;
+}
+
 type OrderRow = {
   id: string;
   provider_order_id: string;
@@ -382,7 +395,8 @@ export async function POST(request: Request) {
       }))
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Erro ao importar o extrato.";
+    const message = extractErrorMessage(error, "Erro ao importar o extrato.");
+    console.error("[mercadopago/reconciliation/import] POST falhou:", error);
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
@@ -455,7 +469,8 @@ export async function GET(request: Request) {
       }))
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Erro ao carregar histórico de conciliações.";
+    const message = extractErrorMessage(error, "Erro ao carregar histórico de conciliações.");
+    console.error("[mercadopago/reconciliation/import] GET falhou:", error);
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
