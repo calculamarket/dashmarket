@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
+  ExternalLink,
   FileSpreadsheet,
   RefreshCw,
   Scale,
@@ -12,6 +13,10 @@ import {
   XCircle
 } from "lucide-react";
 import type { SupabaseClient } from "@supabase/supabase-js";
+
+function buildMercadoLivreOrderUrl(orderId: string) {
+  return `https://www.mercadolivre.com.br/vendas/${encodeURIComponent(orderId)}/detalhe`;
+}
 
 type MatchStatus = "matched" | "amount_mismatch" | "unmatched";
 
@@ -332,7 +337,22 @@ export function ReconciliationView({
                   const MatchIcon = match.Icon;
                   return (
                     <tr key={row.id} className="hover:bg-slate-50/60">
-                      <td className="px-4 py-3 font-semibold text-slate-700">{row.mlOrderId ?? "—"}</td>
+                      <td className="px-4 py-3 font-semibold text-slate-700">
+                        {row.mlOrderId ? (
+                          <a
+                            className="inline-flex items-center gap-1.5 text-sea hover:underline"
+                            href={buildMercadoLivreOrderUrl(row.mlOrderId)}
+                            rel="noreferrer"
+                            target="_blank"
+                            title="Abrir venda no Mercado Livre"
+                          >
+                            {row.mlOrderId}
+                            <ExternalLink aria-hidden className="h-3.5 w-3.5 shrink-0" />
+                          </a>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
                       <td className="max-w-xs truncate px-4 py-3 text-slate-600" title={row.description ?? undefined}>
                         {row.description ?? "—"}
                       </td>
