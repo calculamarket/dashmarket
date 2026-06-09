@@ -46,6 +46,7 @@ import { Sidebar, type ViewKey } from "@/components/dashboard/Sidebar";
 import { KpiCard, KpiSection } from "@/components/dashboard/KpiSection";
 import { InventoryTable } from "@/components/dashboard/InventoryTable";
 import { ReconciliationView } from "@/components/dashboard/ReconciliationView";
+import { AdsGestaoView } from "@/components/dashboard/AdsGestaoView";
 
 type SupabaseStatus = "checking" | "demo" | "connected" | "error";
 type FinanceEntryType = "income" | "expense";
@@ -11467,6 +11468,23 @@ export function DashmarketDashboard() {
                   ))}
                 </div>
               </section>
+            </section>
+          )}
+
+          {activeView === "ads_gestao" && organization && supabaseClient && (
+            <section className="mt-5">
+              <div className="mb-4">
+                <h2 className="text-xl font-bold text-slate-900">Gestão de ADS por Fase</h2>
+                <p className="text-sm text-slate-500">
+                  Classifique seus produtos anunciados por fase de maturidade e receba recomendações de ação.
+                </p>
+              </div>
+              <AdsGestaoView
+                organization={organization}
+                supabaseClient={supabaseClient}
+                activeSales={activeSales}
+                realAdvertising={activeAdvertising}
+              />
             </section>
           )}
 

@@ -30,6 +30,7 @@ export type ViewKey =
   | "estoque_fisico"
   | "ads"
   | "ads_analysis"
+  | "ads_gestao"
   | "pos_venda"
   | "conector"
   | "conciliacao"
@@ -48,6 +49,7 @@ export const views: Array<{ key: ViewKey; label: string; icon: typeof BarChart3 
   { key: "estoque_fisico", label: "Estoque Físico", icon: PackagePlus },
   { key: "ads", label: "Publicidade", icon: Megaphone },
   { key: "ads_analysis", label: "Análise de Anúncios", icon: Target },
+  { key: "ads_gestao", label: "Gestão de ADS", icon: BarChart3 },
   { key: "pos_venda", label: "Pós-venda", icon: ShieldAlert },
   { key: "conector", label: "Conector ativo", icon: Cable },
   { key: "conciliacao", label: "Conciliação", icon: Scale }
@@ -56,7 +58,7 @@ export const views: Array<{ key: ViewKey; label: string; icon: typeof BarChart3 
 const groups: Array<{ label: string; keys: ViewKey[] }> = [
   { label: "Visão Geral", keys: ["principal", "ia"] },
   { label: "Operações", keys: ["produtos", "vendas", "custos", "estoque", "estoque_fisico"] },
-  { label: "Marketing", keys: ["ads", "ads_analysis"] },
+  { label: "Marketing", keys: ["ads", "ads_analysis", "ads_gestao"] },
   { label: "Pós-venda", keys: ["pos_venda"] },
   { label: "Financeiro", keys: ["financeiro_empresa", "financeiro_pessoal", "conciliacao"] },
   { label: "Integrações", keys: ["conector"] }
