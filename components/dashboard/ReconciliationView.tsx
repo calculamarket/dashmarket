@@ -9,6 +9,7 @@ import {
   RefreshCw,
   Scale,
   Trash2,
+  Truck,
   UploadCloud,
   XCircle
 } from "lucide-react";
@@ -31,6 +32,7 @@ type BatchSummary = {
   unmatchedRows: number;
   totalGrossAmount: number;
   totalNetReceivedAmount: number;
+  totalShippingDifference: number;
   createdAt?: string;
 };
 
@@ -44,6 +46,9 @@ type ImportRow = {
   purchaseDate: string | null;
   releasedDate: string | null;
   grossAmount: number;
+  mpShippingCost: number;
+  orderShippingCost: number | null;
+  shippingDifference: number;
   netReceivedAmount: number;
   matchStatus: MatchStatus;
   amountDifference: number;
@@ -285,6 +290,17 @@ export function ReconciliationView({
             tone="slate"
             Icon={Scale}
           />
+          <SummaryCard
+            label="Diferença de frete"
+            value={formatCurrency.format(lastBatch.totalShippingDifference)}
+            tone={lastBatch.totalShippingDifference >= 0 ? "emerald" : "rose"}
+            Icon={Truck}
+            tooltip={
+              lastBatch.totalShippingDifference >= 0
+                ? "ML estimou frete maior que o MP descontou (saldo a favor)"
+                : "MP descontou mais frete que o ML estimou (custo extra / subsídio)"
+            }
+          />
         </section>
       )}
 
@@ -327,7 +343,10 @@ export function ReconciliationView({
                   <th className="px-4 py-3">Liberação</th>
                   <th className="px-4 py-3 text-right">Valor bruto</th>
                   <th className="px-4 py-3 text-right">Valor líquido</th>
-                  <th className="px-4 py-3 text-right">Diferença</th>
+                  <th className="px-4 py-3 text-right">Dif. valor</th>
+                  <th className="px-4 py-3 text-right">Frete ML</th>
+                  <th className="px-4 py-3 text-right">Frete MP</th>
+                  <th className="px-4 py-3 text-right">Dif. frete</th>
                   <th className="px-4 py-3">Status</th>
                 </tr>
               </thead>
@@ -376,6 +395,34 @@ export function ReconciliationView({
                         }`}
                       >
                         {row.amountDifference === 0 ? "—" : formatCurrency.format(row.amountDifference)}
+                      </td>
+                      <td className="px-4 py-3 text-right text-slate-500">
+                        {row.orderShippingCost != null ? formatCurrency.format(row.orderShippingCost) : "—"}
+                      </td>
+                      <td className="px-4 py-3 text-right text-slate-500">
+                        {formatCurrency.format(row.mpShippingCost)}
+                      </td>
+                      <td
+                        className={`px-4 py-3 text-right font-semibold ${
+                          row.orderShippingCost == null
+                            ? "text-slate-400"
+                            : Math.abs(row.shippingDifference) < 0.05
+                              ? "text-slate-400"
+                              : row.shippingDifference > 0
+                                ? "text-emerald-600"
+                                : "text-rose-600"
+                        }`}
+                        title={
+                          row.shippingDifference > 0
+                            ? "ML estimou frete maior que o MP descontou"
+                            : row.shippingDifference < 0
+                              ? "MP descontou mais frete que o ML estimou"
+                              : undefined
+                        }
+                      >
+                        {row.orderShippingCost == null || Math.abs(row.shippingDifference) < 0.05
+                          ? "—"
+                          : formatCurrency.format(row.shippingDifference)}
                       </td>
                       <td className="px-4 py-3">
                         <span className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-bold ring-1 ${match.className}`}>
@@ -471,12 +518,14 @@ function SummaryCard({
   label,
   value,
   tone,
-  Icon
+  Icon,
+  tooltip
 }: {
   label: string;
   value: string;
   tone: "emerald" | "amber" | "rose" | "slate";
   Icon: typeof CheckCircle2;
+  tooltip?: string;
 }) {
   const toneClass = {
     emerald: "bg-emerald-50 text-emerald-600 ring-emerald-100",
@@ -486,11 +535,12 @@ function SummaryCard({
   }[tone];
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm" title={tooltip}>
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-xs font-bold uppercase tracking-widest text-slate-400">{label}</p>
           <p className="mt-1 text-2xl font-extrabold tracking-tight text-slate-900">{value}</p>
+          {tooltip && <p className="mt-1 text-[11px] text-slate-400 leading-tight">{tooltip}</p>}
         </div>
         <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl ring-1 ${toneClass}`}>
           <Icon aria-hidden className="h-5 w-5" />

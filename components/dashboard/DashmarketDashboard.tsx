@@ -2313,6 +2313,54 @@ export function DashmarketDashboard() {
       : adAnalysisTotals.visits > 0
         ? 1
         : 0;
+
+  // Funil de Visitas → Conversão: cruza listingAnalytics (visits + estimatedSoldQuantity)
+  // com activeSales (vendas reais confirmadas por SKU) para comparar taxa estimada vs real.
+  const conversionFunnel = useMemo(() => {
+    const salesBySku = new Map<string, number>();
+    for (const sale of activeSales) {
+      if (!sale.sku) continue;
+      salesBySku.set(sale.sku, (salesBySku.get(sale.sku) ?? 0) + sale.units);
+    }
+
+    // Agrupar por SKU / externalItemId para consolidar múltiplas datas de captura
+    const byItem = new Map<string, {
+      sku: string;
+      externalItemId: string;
+      title: string;
+      visits: number;
+      estimatedSold: number;
+      realSold: number;
+      permalink: string | null | undefined;
+    }>();
+
+    for (const row of listingAnalytics) {
+      const key = row.sku || row.externalItemId;
+      const existing = byItem.get(key);
+      if (existing) {
+        existing.visits += row.visits;
+        existing.estimatedSold += row.estimatedSoldQuantity;
+      } else {
+        byItem.set(key, {
+          sku: row.sku,
+          externalItemId: row.externalItemId,
+          title: row.title,
+          visits: row.visits,
+          estimatedSold: row.estimatedSoldQuantity,
+          realSold: salesBySku.get(row.sku) ?? 0,
+          permalink: row.permalink
+        });
+      }
+    }
+
+    return Array.from(byItem.values())
+      .map((item) => ({
+        ...item,
+        realConversionRate: item.visits > 0 ? item.realSold / item.visits : 0,
+        estimatedConversionRate: item.visits > 0 ? item.estimatedSold / item.visits : 0
+      }))
+      .sort((a, b) => b.visits - a.visits);
+  }, [listingAnalytics, activeSales]);
   const productOptions = useMemo(
     () => {
       const optionsBySku = new Map<string, { sku: string; title: string }>();
@@ -11097,6 +11145,111 @@ export function DashmarketDashboard() {
                   </table>
                 </div>
               </section>
+
+              {/* ── Funil de Visitas → Conversão ── */}
+              {conversionFunnel.length > 0 && (
+                <section className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+                  <div className="border-b border-slate-200 bg-slate-50/50 px-5 py-4">
+                    <div className="flex items-center gap-2">
+                      <LineChart aria-hidden className="h-4 w-4 text-sea" />
+                      <p className="text-sm font-bold text-slate-900">Funil de Visitas → Conversão</p>
+                    </div>
+                    <p className="mt-1 text-xs text-slate-500">
+                      Visitas capturadas pelo ML × vendas reais do sistema × estimativa do ML — por anúncio.
+                    </p>
+                    <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                      <div className="rounded-lg border border-slate-200 bg-white px-3 py-2.5">
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Anúncios</p>
+                        <p className="mt-0.5 text-xl font-extrabold text-slate-900">{formatNumber.format(conversionFunnel.length)}</p>
+                      </div>
+                      <div className="rounded-lg border border-slate-200 bg-white px-3 py-2.5">
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Total visitas</p>
+                        <p className="mt-0.5 text-xl font-extrabold text-slate-900">
+                          {formatNumber.format(conversionFunnel.reduce((s, r) => s + r.visits, 0))}
+                        </p>
+                      </div>
+                      <div className="rounded-lg border border-slate-200 bg-white px-3 py-2.5">
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Conversão real</p>
+                        <p className="mt-0.5 text-xl font-extrabold text-sea">
+                          {formatPercent(
+                            (() => {
+                              const totalVisits = conversionFunnel.reduce((s, r) => s + r.visits, 0);
+                              const totalSold = conversionFunnel.reduce((s, r) => s + r.realSold, 0);
+                              return totalVisits > 0 ? totalSold / totalVisits : 0;
+                            })()
+                          )}
+                        </p>
+                      </div>
+                      <div className="rounded-lg border border-slate-200 bg-white px-3 py-2.5">
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Conversão ML (est.)</p>
+                        <p className="mt-0.5 text-xl font-extrabold text-black/60">
+                          {formatPercent(
+                            (() => {
+                              const totalVisits = conversionFunnel.reduce((s, r) => s + r.visits, 0);
+                              const totalEst = conversionFunnel.reduce((s, r) => s + r.estimatedSold, 0);
+                              return totalVisits > 0 ? totalEst / totalVisits : 0;
+                            })()
+                          )}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[820px] text-left text-sm">
+                      <thead className="bg-slate-50 text-xs font-bold uppercase tracking-wider text-slate-400">
+                        <tr>
+                          <th className="px-4 py-3">Anúncio / SKU</th>
+                          <th className="px-4 py-3 text-right">Visitas</th>
+                          <th className="px-4 py-3 text-right">Vendas reais</th>
+                          <th className="px-4 py-3 text-right">Estimativa ML</th>
+                          <th className="px-4 py-3 text-right">Conv. real</th>
+                          <th className="px-4 py-3 text-right">Conv. est. ML</th>
+                          <th className="px-4 py-3 text-right">Dif. conv.</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {conversionFunnel.map((item) => {
+                          const convDiff = item.realConversionRate - item.estimatedConversionRate;
+                          return (
+                            <tr className="hover:bg-slate-50/60" key={item.externalItemId}>
+                              <td className="px-4 py-3">
+                                <p className="font-semibold text-slate-800 leading-tight">{item.title}</p>
+                                <p className="mt-0.5 text-xs text-slate-400">
+                                  {item.sku}{item.sku !== item.externalItemId ? ` · ${item.externalItemId}` : ""}
+                                </p>
+                              </td>
+                              <td className="px-4 py-3 text-right font-semibold text-slate-700">
+                                {formatNumber.format(item.visits)}
+                              </td>
+                              <td className="px-4 py-3 text-right font-bold text-sea">
+                                {formatNumber.format(item.realSold)}
+                              </td>
+                              <td className="px-4 py-3 text-right text-slate-500">
+                                {formatNumber.format(item.estimatedSold)}
+                              </td>
+                              <td className="px-4 py-3 text-right font-bold text-sea">
+                                {item.visits > 0 ? formatPercent(item.realConversionRate) : "—"}
+                              </td>
+                              <td className="px-4 py-3 text-right text-slate-500">
+                                {item.visits > 0 ? formatPercent(item.estimatedConversionRate) : "—"}
+                              </td>
+                              <td className={`px-4 py-3 text-right font-semibold ${
+                                Math.abs(convDiff) < 0.0005
+                                  ? "text-slate-400"
+                                  : convDiff > 0
+                                    ? "text-emerald-600"
+                                    : "text-rose-600"
+                              }`}>
+                                {Math.abs(convDiff) < 0.0005 ? "—" : (convDiff > 0 ? "+" : "") + formatPercent(convDiff)}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+              )}
             </section>
           )}
 

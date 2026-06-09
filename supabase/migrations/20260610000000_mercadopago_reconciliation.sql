@@ -3,6 +3,13 @@
 -- Mercado Pago não está disponível. As tabelas guardam cada lote importado e
 -- as linhas individuais já cruzadas com public.orders pelo número da venda no
 -- Mercado Livre (order_id no relatório do MP == provider_order_id em orders).
+--
+-- Conciliação de Frete/Repasse:
+-- shipping_cost_amount  = frete cobrado pelo MP no extrato (valor real descontado)
+-- order_shipping_cost   = frete registrado no pedido ML pelo sistema
+-- shipping_difference   = order_shipping_cost - ABS(shipping_cost_amount)
+--   positivo → ML estimou frete maior que o MP descontou (saldo a favor)
+--   negativo → MP descontou mais do que o ML estimou (custo extra / subsídio)
 
 create table public.mp_reconciliation_batches (
   id uuid primary key default gen_random_uuid(),
@@ -16,6 +23,7 @@ create table public.mp_reconciliation_batches (
   unmatched_rows integer not null default 0,
   total_gross_amount numeric(14, 2) not null default 0,
   total_net_received_amount numeric(14, 2) not null default 0,
+  total_shipping_difference numeric(14, 2) not null default 0,
   imported_by uuid references auth.users(id) on delete set null,
   created_at timestamptz not null default now()
 );
@@ -49,6 +57,8 @@ create table public.mp_payment_imports (
   match_status text not null default 'unmatched'
     check (match_status in ('matched', 'amount_mismatch', 'unmatched')),
   amount_difference numeric(14, 2) not null default 0,
+  order_shipping_cost numeric(14, 2),
+  shipping_difference numeric(14, 2) not null default 0,
   raw_payload jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now()
 );

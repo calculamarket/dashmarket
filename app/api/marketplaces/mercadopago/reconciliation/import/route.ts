@@ -19,6 +19,7 @@ type OrderRow = {
   id: string;
   provider_order_id: string;
   gross_amount: number;
+  shipping_cost_amount: number;
 };
 
 type ParsedRow = {
@@ -255,7 +256,7 @@ export async function POST(request: Request) {
       const chunk = orderIds.slice(offset, offset + chunkSize);
       const { data: orders, error: ordersError } = await supabase
         .from("orders")
-        .select("id, provider_order_id, gross_amount")
+        .select("id, provider_order_id, gross_amount, shipping_cost_amount")
         .eq("organization_id", organizationId)
         .in("provider_order_id", chunk);
       if (ordersError) throw ordersError;
@@ -269,6 +270,7 @@ export async function POST(request: Request) {
     let unmatchedRows = 0;
     let totalGrossAmount = 0;
     let totalNetReceivedAmount = 0;
+    let totalShippingDifference = 0;
 
     const periodTimestamps = parsedRows
       .map((row) => row.purchase_date)
@@ -301,6 +303,18 @@ export async function POST(request: Request) {
       const order = row.ml_order_id ? ordersByProviderId.get(row.ml_order_id) ?? null : null;
       let matchStatus: "matched" | "amount_mismatch" | "unmatched" = "unmatched";
       let amountDifference = 0;
+
+      // Frete/repasse: comparar frete registrado no pedido ML (order.shipping_cost_amount)
+      // com o frete descontado no extrato MP (row.shipping_cost_amount, pode ser negativo).
+      // shipping_difference = order_shipping_cost - ABS(mp_shipping_cost)
+      //   > 0 → ML estimou frete maior que o MP cobrou (saldo a favor do vendedor)
+      //   < 0 → MP cobrou mais frete do que o ML estimou (custo extra / subsídio ML)
+      const orderShippingCost = order ? Number((order.shipping_cost_amount ?? 0).toFixed(2)) : null;
+      const mpShippingAbs = Math.abs(row.shipping_cost_amount);
+      const shippingDifference = orderShippingCost != null
+        ? Number((orderShippingCost - mpShippingAbs).toFixed(2))
+        : 0;
+      totalShippingDifference += shippingDifference;
 
       if (order) {
         amountDifference = Number((row.gross_amount - order.gross_amount).toFixed(2));
@@ -342,6 +356,8 @@ export async function POST(request: Request) {
         matched_order_id: order?.id ?? null,
         match_status: matchStatus,
         amount_difference: amountDifference,
+        order_shipping_cost: orderShippingCost,
+        shipping_difference: shippingDifference,
         raw_payload: row.raw_payload
       };
     });
@@ -360,7 +376,8 @@ export async function POST(request: Request) {
         mismatched_rows: mismatchedRows,
         unmatched_rows: unmatchedRows,
         total_gross_amount: Number(totalGrossAmount.toFixed(2)),
-        total_net_received_amount: Number(totalNetReceivedAmount.toFixed(2))
+        total_net_received_amount: Number(totalNetReceivedAmount.toFixed(2)),
+        total_shipping_difference: Number(totalShippingDifference.toFixed(2))
       })
       .eq("id", batchId);
 
@@ -377,7 +394,8 @@ export async function POST(request: Request) {
         mismatchedRows,
         unmatchedRows,
         totalGrossAmount: Number(totalGrossAmount.toFixed(2)),
-        totalNetReceivedAmount: Number(totalNetReceivedAmount.toFixed(2))
+        totalNetReceivedAmount: Number(totalNetReceivedAmount.toFixed(2)),
+        totalShippingDifference: Number(totalShippingDifference.toFixed(2))
       },
       rows: importRows.map((row, index) => ({
         id: `${batchId}-${index}`,
@@ -389,6 +407,9 @@ export async function POST(request: Request) {
         purchaseDate: row.purchase_date,
         releasedDate: row.released_date,
         grossAmount: row.gross_amount,
+        mpShippingCost: Math.abs(row.shipping_cost_amount),
+        orderShippingCost: row.order_shipping_cost,
+        shippingDifference: row.shipping_difference,
         netReceivedAmount: row.net_received_amount,
         matchStatus: row.match_status,
         amountDifference: row.amount_difference
@@ -445,7 +466,7 @@ export async function GET(request: Request) {
     const { data: batches, error: batchesError } = await supabase
       .from("mp_reconciliation_batches")
       .select(
-        "id, file_name, period_from, period_to, total_rows, matched_rows, mismatched_rows, unmatched_rows, total_gross_amount, total_net_received_amount, created_at"
+        "id, file_name, period_from, period_to, total_rows, matched_rows, mismatched_rows, unmatched_rows, total_gross_amount, total_net_received_amount, total_shipping_difference, created_at"
       )
       .eq("organization_id", organizationId)
       .order("created_at", { ascending: false })
@@ -465,6 +486,7 @@ export async function GET(request: Request) {
         unmatchedRows: batch.unmatched_rows as number,
         totalGrossAmount: Number(batch.total_gross_amount ?? 0),
         totalNetReceivedAmount: Number(batch.total_net_received_amount ?? 0),
+        totalShippingDifference: Number(batch.total_shipping_difference ?? 0),
         createdAt: batch.created_at as string
       }))
     });
