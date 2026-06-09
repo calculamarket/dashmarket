@@ -2419,9 +2419,10 @@ export function DashmarketDashboard() {
     if (productOptions.length === 0) return;
 
     setCalculatorForm((current) => {
-      if (productOptions.some((product) => product.sku === current.sku)) {
-        return current;
-      }
+      // Só inicializa automaticamente se não há SKU algum no form.
+      // Nunca sobrescreve um SKU já definido (ex: importado de uma venda),
+      // mesmo que ele ainda não apareça em productOptions.
+      if (current.sku) return current;
 
       return {
         ...current,
@@ -5126,6 +5127,10 @@ export function DashmarketDashboard() {
       );
       return;
     }
+
+    // Remove o SKU de hiddenSkus (caso tenha sido arquivado anteriormente),
+    // garantindo que ele apareça em productOptions e não seja resetado pelo useEffect.
+    setHiddenSkus((current) => current.filter((hiddenSku) => hiddenSku !== sale.sku));
 
     const unitPrice =
       sale.unitPrice > 0
@@ -9878,6 +9883,12 @@ export function DashmarketDashboard() {
                           }}
                           value={calculatorForm.sku}
                         >
+                          {/* Garante que o SKU importado aparece como opção válida,
+                              mesmo que ainda não esteja em productOptions */}
+                          {calculatorForm.sku &&
+                            !productOptions.some(p => p.sku === calculatorForm.sku) && (
+                              <option value={calculatorForm.sku}>{calculatorForm.sku} (novo)</option>
+                          )}
                           {productOptions.map((product) => (
                             <option key={product.sku} value={product.sku}>{product.sku}</option>
                           ))}
