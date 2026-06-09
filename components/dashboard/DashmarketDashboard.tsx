@@ -2123,6 +2123,14 @@ export function DashmarketDashboard() {
   const [claimsData, setClaimsData] = useState<ClaimsResponse | null>(null);
   const [posVendaError, setPosVendaError] = useState<string | null>(null);
 
+  // Mapa orderId → status de conciliação MP (carregado ao entrar em "Vendas")
+  type ReconciliationStatus = {
+    matchStatus: "matched" | "amount_mismatch" | "unmatched";
+    amountDifference: number;
+    shippingDifference: number;
+  };
+  const [reconciliationMap, setReconciliationMap] = useState<Map<string, ReconciliationStatus>>(new Map());
+
   const [marketplaceDiagnostics, setMarketplaceDiagnostics] =
     useState<MercadoLivreDiagnosticsResponse | null>(null);
   const [calculatorMode, setCalculatorMode] =
@@ -6259,6 +6267,45 @@ export function DashmarketDashboard() {
     }
   }, [activeView]);
 
+  // Carrega status de conciliação MP para exibir badges nas vendas
+  useEffect(() => {
+    if (activeView !== "vendas" || !supabaseClient || !organization) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await supabaseClient
+          .from("mp_payment_imports")
+          .select("ml_order_id, match_status, amount_difference, shipping_difference")
+          .eq("organization_id", organization.id)
+          .in("match_status", ["matched", "amount_mismatch"]);
+        if (cancelled || !data) return;
+        const map = new Map<string, ReconciliationStatus>();
+        for (const row of data as Array<{
+          ml_order_id: string | null;
+          match_status: string;
+          amount_difference: number | null;
+          shipping_difference: number | null;
+        }>) {
+          if (!row.ml_order_id) continue;
+          // Em caso de múltiplas importações pro mesmo pedido, manter a pior divergência
+          const existing = map.get(row.ml_order_id);
+          const status = row.match_status as ReconciliationStatus["matchStatus"];
+          if (!existing || (status === "amount_mismatch" && existing.matchStatus === "matched")) {
+            map.set(row.ml_order_id, {
+              matchStatus: status,
+              amountDifference: Number(row.amount_difference ?? 0),
+              shippingDifference: Number(row.shipping_difference ?? 0)
+            });
+          }
+        }
+        setReconciliationMap(map);
+      } catch {
+        // silencioso — badge de conciliação é informativo, não crítico
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [activeView, supabaseClient, organization]);
+
   return (
     <div className="flex min-h-screen bg-slate-50 text-slate-900">
       <Sidebar
@@ -8451,9 +8498,45 @@ export function DashmarketDashboard() {
                             <span>{formatDateTimeInSaoPaulo(sale.soldAt)}</span>
                             <span>{formatNumber.format(sale.quantity)} un.</span>
                           </div>
-                          <p className="mt-3 font-mono text-xs font-semibold text-black/45">
-                            {sale.orderId}
-                          </p>
+                          <div className="mt-3 flex flex-wrap items-center gap-2">
+                            <p className="font-mono text-xs font-semibold text-black/45">
+                              {sale.orderId}
+                            </p>
+                            {(() => {
+                              const rec = reconciliationMap.get(sale.orderId);
+                              if (!rec) return null;
+                              if (rec.matchStatus === "matched") {
+                                const hasShippingDiff = Math.abs(rec.shippingDifference) >= 0.05;
+                                return (
+                                  <span
+                                    className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-bold ring-1 ${
+                                      hasShippingDiff
+                                        ? "bg-amber-50 text-amber-700 ring-amber-200"
+                                        : "bg-emerald-50 text-emerald-700 ring-emerald-200"
+                                    }`}
+                                    title={
+                                      hasShippingDiff
+                                        ? `Conciliado — diferença de frete: ${formatCurrency.format(rec.shippingDifference)}`
+                                        : "Conciliado com o Mercado Pago"
+                                    }
+                                  >
+                                    {hasShippingDiff ? "⚠" : "✓"} MP {hasShippingDiff ? `frete ${formatCurrency.format(rec.shippingDifference)}` : "Conciliado"}
+                                  </span>
+                                );
+                              }
+                              if (rec.matchStatus === "amount_mismatch") {
+                                return (
+                                  <span
+                                    className="inline-flex items-center gap-1 rounded-md bg-rose-50 px-2 py-0.5 text-[10px] font-bold text-rose-700 ring-1 ring-rose-200"
+                                    title={`Divergência de valor: ${formatCurrency.format(rec.amountDifference)}`}
+                                  >
+                                    ✕ MP Divergência {formatCurrency.format(rec.amountDifference)}
+                                  </span>
+                                );
+                              }
+                              return null;
+                            })()}
+                          </div>
                         </div>
 
                         <div className="border-b border-black/10 p-4 xl:border-b-0 xl:border-r">
