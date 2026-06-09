@@ -83,6 +83,8 @@ export function ReconciliationView({
   const [rows, setRows] = useState<ImportRow[]>([]);
   const [filter, setFilter] = useState<RowFilter>("all");
   const [deletingBatchId, setDeletingBatchId] = useState<string | null>(null);
+  const [reprocessingBatchId, setReprocessingBatchId] = useState<string | null>(null);
+  const [reprocessResult, setReprocessResult] = useState<{ matched: number; mismatched: number; unmatched: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const getAccessToken = useCallback(async () => {
@@ -199,6 +201,64 @@ export function ReconciliationView({
     [organizationId, supabaseClient, getAccessToken, lastBatch]
   );
 
+  const handleReprocess = useCallback(
+    async (batch: BatchSummary) => {
+      if (!organizationId || !supabaseClient) return;
+      setReprocessingBatchId(batch.id);
+      setReprocessResult(null);
+      setError(null);
+      try {
+        const accessToken = await getAccessToken();
+        if (!accessToken) throw new Error("Sessão expirada. Faça login novamente.");
+
+        const response = await fetch("/api/marketplaces/mercadopago/reconciliation/reprocess", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ organizationId, batchId: batch.id })
+        });
+        const payload = (await response.json()) as {
+          updated?: number;
+          matched?: number;
+          mismatched?: number;
+          unmatched?: number;
+          error?: string;
+        };
+        if (!response.ok) throw new Error(payload.error ?? "Erro ao re-processar.");
+
+        setReprocessResult({
+          matched: payload.matched ?? 0,
+          mismatched: payload.mismatched ?? 0,
+          unmatched: payload.unmatched ?? 0
+        });
+
+        // Atualiza o lote na lista e limpa a visualização atual para recarregar
+        if (lastBatch?.id === batch.id) {
+          setLastBatch((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  matchedRows: payload.matched ?? 0,
+                  mismatchedRows: payload.mismatched ?? 0,
+                  unmatchedRows: payload.unmatched ?? 0
+                }
+              : prev
+          );
+          setRows([]);
+          setFilter("all");
+        }
+        await loadHistory();
+      } catch (reprocessError) {
+        setError(reprocessError instanceof Error ? reprocessError.message : "Erro ao re-processar.");
+      } finally {
+        setReprocessingBatchId(null);
+      }
+    },
+    [organizationId, supabaseClient, getAccessToken, lastBatch, loadHistory]
+  );
+
   const visibleRows = filter === "all" ? rows : rows.filter((row) => row.matchStatus === filter);
 
   return (
@@ -261,6 +321,19 @@ export function ReconciliationView({
         <div className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
           <AlertTriangle aria-hidden className="mt-0.5 h-4 w-4 shrink-0" />
           <span>{error}</span>
+        </div>
+      )}
+
+      {reprocessResult && (
+        <div className="flex items-start gap-2 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">
+          <CheckCircle2 aria-hidden className="mt-0.5 h-4 w-4 shrink-0 text-sky-600" />
+          <span>
+            Re-processamento concluído —{" "}
+            <strong>{reprocessResult.matched} conciliados</strong>,{" "}
+            <strong className="text-amber-700">{reprocessResult.mismatched} com divergência</strong>,{" "}
+            <strong className="text-slate-500">{reprocessResult.unmatched} sem correspondência</strong>.
+            {reprocessResult.matched > 0 && " Os badges aparecerão na aba Vendas."}
+          </span>
         </div>
       )}
 
@@ -445,15 +518,17 @@ export function ReconciliationView({
             <p className="text-sm font-bold text-slate-900">Histórico de importações</p>
             <p className="text-xs text-slate-500">Últimos extratos conciliados nesta empresa</p>
           </div>
-          <button
-            className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-600 shadow-sm transition hover:bg-slate-50 disabled:opacity-50"
-            disabled={isLoadingHistory}
-            onClick={() => void loadHistory()}
-            type="button"
-          >
-            <RefreshCw aria-hidden className={`h-3.5 w-3.5 ${isLoadingHistory ? "animate-spin" : ""}`} />
-            Atualizar
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-600 shadow-sm transition hover:bg-slate-50 disabled:opacity-50"
+              disabled={isLoadingHistory}
+              onClick={() => void loadHistory()}
+              type="button"
+            >
+              <RefreshCw aria-hidden className={`h-3.5 w-3.5 ${isLoadingHistory ? "animate-spin" : ""}`} />
+              Atualizar
+            </button>
+          </div>
         </div>
         {batches.length === 0 ? (
           <p className="px-5 py-6 text-sm text-slate-500">Nenhuma importação realizada ainda.</p>
@@ -487,21 +562,38 @@ export function ReconciliationView({
                       {formatCurrency.format(batch.totalNetReceivedAmount)}
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <button
-                        aria-label={`Excluir importação ${batch.fileName}`}
-                        className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-2.5 text-xs font-semibold text-rose-600 shadow-sm transition hover:bg-rose-100 disabled:opacity-50"
-                        disabled={deletingBatchId === batch.id}
-                        onClick={() => void handleDeleteBatch(batch)}
-                        title="Excluir importação"
-                        type="button"
-                      >
-                        {deletingBatchId === batch.id ? (
-                          <RefreshCw aria-hidden className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <Trash2 aria-hidden className="h-3.5 w-3.5" />
-                        )}
-                        Excluir
-                      </button>
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          aria-label={`Re-processar importação ${batch.fileName}`}
+                          className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-sky-200 bg-sky-50 px-2.5 text-xs font-semibold text-sky-700 shadow-sm transition hover:bg-sky-100 disabled:opacity-50"
+                          disabled={reprocessingBatchId === batch.id || deletingBatchId === batch.id}
+                          onClick={() => void handleReprocess(batch)}
+                          title="Re-processar cruzamento com as vendas atuais do sistema"
+                          type="button"
+                        >
+                          {reprocessingBatchId === batch.id ? (
+                            <RefreshCw aria-hidden className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <RefreshCw aria-hidden className="h-3.5 w-3.5" />
+                          )}
+                          Re-processar
+                        </button>
+                        <button
+                          aria-label={`Excluir importação ${batch.fileName}`}
+                          className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-2.5 text-xs font-semibold text-rose-600 shadow-sm transition hover:bg-rose-100 disabled:opacity-50"
+                          disabled={deletingBatchId === batch.id || reprocessingBatchId === batch.id}
+                          onClick={() => void handleDeleteBatch(batch)}
+                          title="Excluir importação"
+                          type="button"
+                        >
+                          {deletingBatchId === batch.id ? (
+                            <RefreshCw aria-hidden className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Trash2 aria-hidden className="h-3.5 w-3.5" />
+                          )}
+                          Excluir
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
