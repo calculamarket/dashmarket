@@ -5271,6 +5271,17 @@ export function DashmarketDashboard() {
             (productRecord) => productRecord.internal_sku === product.sku
           ) ?? (await ensureProductForSku(product.sku, product.title));
 
+        // Exclui TODOS os sku_costs do produto antes de arquivar,
+        // para evitar que custos antigos (inclusive customizados) reapareçam
+        // quando o produto for reativado no futuro.
+        const { error: deleteCostsError } = await supabaseClient
+          .from("sku_costs")
+          .delete()
+          .eq("organization_id", organization.id)
+          .eq("product_id", currentProduct.id);
+
+        if (deleteCostsError) throw deleteCostsError;
+
         const { error } = await supabaseClient
           .from("products")
           .update({ status: "archived" })
@@ -5348,12 +5359,14 @@ export function DashmarketDashboard() {
           calculatorForm.name || calculatorForm.sku
         );
 
+        // Remove TODOS os custos do produto (não só os gerenciados pela calculadora)
+        // para garantir limpeza completa antes de reinserir, inclusive custos customizados
+        // que poderiam causar cálculos incorretos ao reutilizar um produto reativado.
         const { error: deleteCostError } = await supabaseClient
           .from("sku_costs")
           .delete()
           .eq("organization_id", organization.id)
-          .eq("product_id", product.id)
-          .in("cost_name", [...CALCULATOR_COST_LABELS]);
+          .eq("product_id", product.id);
 
         if (deleteCostError) throw deleteCostError;
 
