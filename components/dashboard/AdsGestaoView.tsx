@@ -369,21 +369,28 @@ function AdsTableRow({ product, expanded, onToggle, onConfig, supabaseClient, pe
 
     async function fetchHistory() {
       setLoadingChart(true);
-      // Busca últimos 30 dias de advertising_metrics para este SKU
       const since = new Date();
       since.setDate(since.getDate() - 30);
       const sinceStr = since.toISOString().slice(0, 10);
 
-      // Junta advertising_metrics → products por internal_sku = item_id
+      // 1. Resolve internal_sku → product_id
+      const { data: prodData } = await supabaseClient
+        .from("products")
+        .select("id")
+        .eq("internal_sku", settings.item_id)
+        .maybeSingle();
+
+      if (!prodData?.id) { setLoadingChart(false); return; }
+
+      // 2. Busca métricas diárias para esse product_id
       const { data } = await supabaseClient
         .from("advertising_metrics")
-        .select("metric_date, ad_spend_amount, attributed_revenue_amount, attributed_orders, products!inner(internal_sku)")
-        .eq("products.internal_sku", settings.item_id)
+        .select("metric_date, ad_spend_amount, attributed_revenue_amount, attributed_orders")
+        .eq("product_id", prodData.id)
         .gte("metric_date", sinceStr)
         .order("metric_date", { ascending: true });
 
       if (data) {
-        // Agrupa por dia (pode ter múltiplas campanhas no mesmo dia)
         const byDate = new Map<string, { spend: number; revAds: number; ordersAds: number }>();
         for (const row of data as Array<{
           metric_date: string;
@@ -398,12 +405,10 @@ function AdsTableRow({ product, expanded, onToggle, onConfig, supabaseClient, pe
           byDate.set(row.metric_date, cur);
         }
 
-        // Precisamos do total por dia para calcular TACOS e taxa_organica
-        // sem dados de receita_total diária, TACOS = gasto / receita_ads (proxy)
         const points: DailyMetricPoint[] = Array.from(byDate.entries()).map(([date, v]) => ({
           date,
           acos: v.revAds > 0 ? (v.spend / v.revAds) * 100 : null,
-          tacos: v.revAds > 0 ? (v.spend / v.revAds) * 100 : null, // proxy sem total
+          tacos: v.revAds > 0 ? (v.spend / v.revAds) * 100 : null,
           taxa_organica: v.ordersAds > 0 ? Math.max(0, 100 - (v.ordersAds / Math.max(1, v.ordersAds + 1)) * 100) : null,
         }));
 
@@ -602,30 +607,53 @@ export function AdsGestaoView({
   }, [supabaseClient, organization.id]);
 
   // ── Carregar vendas atribuídas ao ADS (attributed_orders) ──
+  // Usa dois queries separados para evitar problema com join !inner via PostgREST.
   const loadAttributedOrders = useCallback(async () => {
     const since = new Date();
     since.setDate(since.getDate() - periodDays);
     const sinceStr = since.toISOString().slice(0, 10);
 
-    const { data } = await supabaseClient
+    // 1. Busca product_id + attributed_orders de advertising_metrics
+    const { data: metricsData } = await supabaseClient
       .from("advertising_metrics")
-      .select("attributed_orders, products!inner(internal_sku)")
+      .select("product_id, attributed_orders")
       .eq("organization_id", organization.id)
-      .gte("metric_date", sinceStr);
+      .gte("metric_date", sinceStr)
+      .not("product_id", "is", null);
 
-    if (data) {
-      const map = new Map<string, number>();
-      type AdMetricJoinRow = {
-        attributed_orders: number;
-        products: Array<{ internal_sku: string }>;
-      };
-      for (const row of (data as unknown) as AdMetricJoinRow[]) {
-        const sku = Array.isArray(row.products) ? row.products[0]?.internal_sku : null;
-        if (!sku) continue;
-        map.set(sku, (map.get(sku) ?? 0) + Number(row.attributed_orders ?? 0));
-      }
-      setAttributedOrdersBySku(map);
+    if (!metricsData || metricsData.length === 0) return;
+
+    type MetricRow = { product_id: string; attributed_orders: number };
+    const rows = metricsData as MetricRow[];
+
+    // Agrupa attributed_orders por product_id
+    const ordersByProductId = new Map<string, number>();
+    for (const row of rows) {
+      if (!row.product_id) continue;
+      ordersByProductId.set(
+        row.product_id,
+        (ordersByProductId.get(row.product_id) ?? 0) + Number(row.attributed_orders ?? 0)
+      );
     }
+
+    // 2. Resolve product_id → internal_sku num único query
+    const productIds = Array.from(ordersByProductId.keys());
+    const { data: productsData } = await supabaseClient
+      .from("products")
+      .select("id, internal_sku")
+      .in("id", productIds);
+
+    if (!productsData) return;
+
+    type ProductRow = { id: string; internal_sku: string };
+    const map = new Map<string, number>();
+    for (const prod of productsData as ProductRow[]) {
+      const orders = ordersByProductId.get(prod.id) ?? 0;
+      if (prod.internal_sku && orders > 0) {
+        map.set(prod.internal_sku, (map.get(prod.internal_sku) ?? 0) + orders);
+      }
+    }
+    setAttributedOrdersBySku(map);
   }, [supabaseClient, organization.id, periodDays]);
 
   useEffect(() => {
@@ -720,27 +748,29 @@ export function AdsGestaoView({
     setIsImporting(true);
     setError(null);
     try {
-      // Busca SKUs que têm dados de advertising_metrics na org
-      const { data, error: dbErr } = await supabaseClient
-        .from("advertising_metrics")
-        .select("products!inner(internal_sku, title)")
-        .eq("organization_id", organization.id);
-
-      if (dbErr) throw new Error(dbErr.message);
-
-      type ImportJoinRow = {
-        products: Array<{ internal_sku: string; title: string }>;
-      };
+      // Usa os dados já carregados nas props:
+      // 1º prioridade: SKUs com gasto em ADS (realAdvertising)
+      // 2º prioridade: todos os SKUs com vendas (activeSales) — fallback
       const skuSet = new Map<string, string>();
-      for (const row of (data ?? []) as unknown as ImportJoinRow[]) {
-        const prod = Array.isArray(row.products) ? row.products[0] : null;
-        if (prod?.internal_sku) {
-          skuSet.set(prod.internal_sku, prod.title ?? prod.internal_sku);
+
+      for (const ad of realAdvertising) {
+        if (ad.sku && ad.sku !== "SKU sem codigo") {
+          const sale = activeSales.find((s) => s.sku === ad.sku);
+          skuSet.set(ad.sku, sale?.title ?? ad.sku);
+        }
+      }
+
+      // Se não há dados de ADS, usa as vendas ativas como fallback
+      if (skuSet.size === 0) {
+        for (const sale of activeSales) {
+          if (sale.sku && sale.sku !== "SKU sem codigo") {
+            skuSet.set(sale.sku, sale.title ?? sale.sku);
+          }
         }
       }
 
       if (skuSet.size === 0) {
-        setError("Nenhum produto com campanha ativa encontrado. Sincronize a publicidade primeiro.");
+        setError("Nenhum produto encontrado. Sincronize as vendas e a publicidade primeiro.");
         return;
       }
 
