@@ -362,6 +362,69 @@ function getShopeePreset(price: number): MarketplacePresetId {
   return "shopee-200-500";
 }
 
+const MARKETPLACE_GROUPS: Record<MarketplacePresetId, string> = {
+  "ml-classico": "Mercado Livre",
+  "ml-premium": "Mercado Livre",
+  "ml-premium-full": "Mercado Livre",
+  "shopee-ate80": "Shopee",
+  "shopee-80-200": "Shopee",
+  "shopee-200-500": "Shopee",
+  amazon: "Amazon",
+  magalu: "Magalu",
+  americanas: "Americanas",
+  custom: "Outro"
+};
+
+const MARKETPLACE_TAGS = [
+  "Mercado Livre",
+  "Shopee",
+  "Amazon",
+  "Magalu",
+  "Americanas",
+  "Outro"
+] as const;
+
+const PRODUCT_MARKETPLACES_STORAGE_KEY = "dashmarket:product-marketplaces";
+
+function readStoredProductMarketplaces(): Record<string, string> {
+  if (typeof window === "undefined") return {};
+
+  try {
+    const stored = window.localStorage.getItem(PRODUCT_MARKETPLACES_STORAGE_KEY);
+    if (!stored) return {};
+
+    const parsed = JSON.parse(stored) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return {};
+    }
+
+    return Object.entries(parsed as Record<string, unknown>).reduce<
+      Record<string, string>
+    >((acc, [sku, value]) => {
+      if (sku && typeof value === "string") {
+        acc[sku] = value;
+      }
+
+      return acc;
+    }, {});
+  } catch {
+    return {};
+  }
+}
+
+function writeStoredProductMarketplaces(marketplaces: Record<string, string>) {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.localStorage.setItem(
+      PRODUCT_MARKETPLACES_STORAGE_KEY,
+      JSON.stringify(marketplaces)
+    );
+  } catch {
+    // O mapeamento continua valendo na sessao atual se o storage estiver bloqueado.
+  }
+}
+
 type CostCalculatorFormState = {
   sku: string;
   name: string;
@@ -2182,6 +2245,10 @@ export function DashmarketDashboard() {
   const [hiddenSkus, setHiddenSkus] = useState<string[]>([]);
   const [showNewProductForm, setShowNewProductForm] = useState(false);
   const [newProductDraft, setNewProductDraft] = useState({ sku: "", name: "" });
+  const [productMarketplaces, setProductMarketplaces] = useState<Record<string, string>>(() =>
+    readStoredProductMarketplaces()
+  );
+  const [costMarketplaceFilter, setCostMarketplaceFilter] = useState("all");
   const [isSavingProduct, setIsSavingProduct] = useState(false);
   const [isSavingCalculatorCosts, setIsSavingCalculatorCosts] = useState(false);
   const [isResettingCalculatorCosts, setIsResettingCalculatorCosts] =
@@ -2438,6 +2505,10 @@ export function DashmarketDashboard() {
   useEffect(() => {
     writeStoredPhysicalInventoryQuantities(physicalInventoryQuantities);
   }, [physicalInventoryQuantities]);
+
+  useEffect(() => {
+    writeStoredProductMarketplaces(productMarketplaces);
+  }, [productMarketplaces]);
 
   const selectedAdapter = getMarketplaceAdapter(selectedProvider);
   const mercadoLivreAccount = marketplaceAccounts.find(
@@ -3404,13 +3475,19 @@ export function DashmarketDashboard() {
   const filteredCostCenterProductRows = useMemo(() => {
     const query = costProductSearch.trim().toLowerCase();
 
-    return costCenterProductRows.filter(
-      (product) =>
+    return costCenterProductRows.filter((product) => {
+      const matchesQuery =
         !query ||
         product.sku.toLowerCase().includes(query) ||
-        product.title.toLowerCase().includes(query)
-    );
-  }, [costCenterProductRows, costProductSearch]);
+        product.title.toLowerCase().includes(query);
+
+      const matchesMarketplace =
+        costMarketplaceFilter === "all" ||
+        (productMarketplaces[product.sku] ?? "Outro") === costMarketplaceFilter;
+
+      return matchesQuery && matchesMarketplace;
+    });
+  }, [costCenterProductRows, costProductSearch, costMarketplaceFilter, productMarketplaces]);
 
   const calculatorResult = useMemo(
     () => calculateCostsFromCalculator(calculatorForm, calculatorMode),
@@ -5473,6 +5550,10 @@ export function DashmarketDashboard() {
         setHiddenSkus((current) =>
           current.filter((hiddenSku) => hiddenSku !== calculatorForm.sku)
         );
+        setProductMarketplaces((current) => ({
+          ...current,
+          [calculatorForm.sku]: MARKETPLACE_GROUPS[selectedPreset]
+        }));
         setDataMessage(
           entries.length > 0
             ? `Custos da calculadora atualizados no SKU ${calculatorForm.sku}.`
@@ -10009,32 +10090,28 @@ export function DashmarketDashboard() {
                     {/* Marketplace preset */}
                     <div>
                       <p className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">Marketplace</p>
-                      <div className="flex flex-wrap gap-2">
+                      <select
+                        className="h-10 w-full max-w-xs rounded-lg border border-slate-200 bg-paper px-3 text-sm font-normal text-slate-900 outline-none focus:ring-4 focus:ring-sea/20"
+                        onChange={(event) => {
+                          const presetId = event.target.value as MarketplacePresetId;
+                          const preset = MARKETPLACE_PRESETS.find(p => p.id === presetId);
+                          if (!preset) return;
+
+                          setSelectedPreset(preset.id);
+                          if (preset.id !== "custom") {
+                            setCalculatorForm(c => ({
+                              ...c,
+                              commissionPercentage: String(preset.commission),
+                              fixedFee: String(preset.fixedFee)
+                            }));
+                          }
+                        }}
+                        value={selectedPreset}
+                      >
                         {MARKETPLACE_PRESETS.map((preset) => (
-                          <button
-                            className={`h-8 rounded-lg px-3 text-xs font-bold ring-1 transition ${
-                              selectedPreset === preset.id
-                                ? "bg-slate-900 text-white ring-slate-900"
-                                : "bg-white text-slate-600 ring-slate-200 hover:bg-slate-50"
-                            }`}
-                            key={preset.id}
-                            onClick={() => {
-                              setSelectedPreset(preset.id);
-                              if (preset.id !== "custom") {
-                                setCalculatorForm(c => ({
-                                  ...c,
-                                  commissionPercentage: String(preset.commission),
-                                  fixedFee: String(preset.fixedFee)
-                                }));
-                              }
-                            }}
-                            title={preset.hint}
-                            type="button"
-                          >
-                            {preset.label}
-                          </button>
+                          <option key={preset.id} value={preset.id}>{preset.label}</option>
                         ))}
-                      </div>
+                      </select>
                       {MARKETPLACE_PRESETS.find(p => p.id === selectedPreset)?.hint && (
                         <p className="mt-1.5 text-xs text-amber-600">
                           💡 {MARKETPLACE_PRESETS.find(p => p.id === selectedPreset)?.hint}
@@ -10548,18 +10625,30 @@ export function DashmarketDashboard() {
                       Somente SKUs calculados pela Calculadora de Custos aparecem aqui.
                     </p>
                   </div>
-                  <span className="relative w-full lg:w-80">
-                    <Search
-                      aria-hidden
-                      className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-black/40"
-                    />
-                    <input
-                      className="h-10 w-full rounded-lg border border-black/10 bg-paper pl-9 pr-3 text-sm outline-none focus:ring-4 focus:ring-sea/20"
-                      onChange={(event) => setCostProductSearch(event.target.value)}
-                      placeholder="Buscar SKU ou produto"
-                      value={costProductSearch}
-                    />
-                  </span>
+                  <div className="flex w-full flex-col gap-3 sm:flex-row lg:w-auto">
+                    <select
+                      className="h-10 rounded-lg border border-black/10 bg-paper px-3 text-sm outline-none focus:ring-4 focus:ring-sea/20"
+                      onChange={(event) => setCostMarketplaceFilter(event.target.value)}
+                      value={costMarketplaceFilter}
+                    >
+                      <option value="all">Todos os marketplaces</option>
+                      {MARKETPLACE_TAGS.map((tag) => (
+                        <option key={tag} value={tag}>{tag}</option>
+                      ))}
+                    </select>
+                    <span className="relative w-full lg:w-80">
+                      <Search
+                        aria-hidden
+                        className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-black/40"
+                      />
+                      <input
+                        className="h-10 w-full rounded-lg border border-black/10 bg-paper pl-9 pr-3 text-sm outline-none focus:ring-4 focus:ring-sea/20"
+                        onChange={(event) => setCostProductSearch(event.target.value)}
+                        placeholder="Buscar SKU ou produto"
+                        value={costProductSearch}
+                      />
+                    </span>
+                  </div>
                 </div>
                 <div className="table-scroll overflow-x-auto">
                   <table className="min-w-[1380px] w-full text-left text-sm">
@@ -10567,6 +10656,7 @@ export function DashmarketDashboard() {
                       <tr>
                         <th className="px-4 py-3">Produto</th>
                         <th className="px-4 py-3">SKU</th>
+                        <th className="px-4 py-3">Marketplace</th>
                         <th className="px-4 py-3">Preco medio</th>
                         <th className="px-4 py-3">Custo produto</th>
                         <th className="px-4 py-3">Embalagem</th>
@@ -10616,6 +10706,22 @@ export function DashmarketDashboard() {
                             ) : (
                               product.sku
                             )}
+                          </td>
+                          <td className="px-4 py-3">
+                            <select
+                              className="h-9 rounded-lg border border-black/10 bg-paper px-2 text-xs outline-none focus:ring-4 focus:ring-sea/20"
+                              onChange={(event) =>
+                                setProductMarketplaces((current) => ({
+                                  ...current,
+                                  [product.sku]: event.target.value
+                                }))
+                              }
+                              value={productMarketplaces[product.sku] ?? "Outro"}
+                            >
+                              {MARKETPLACE_TAGS.map((tag) => (
+                                <option key={tag} value={tag}>{tag}</option>
+                              ))}
+                            </select>
                           </td>
                           <td className="px-4 py-3">
                             {formatCurrency.format(product.averagePrice)}
@@ -10725,7 +10831,7 @@ export function DashmarketDashboard() {
                         <tr>
                           <td
                             className="px-4 py-8 text-center text-black/55"
-                            colSpan={10}
+                            colSpan={11}
                           >
                             Nenhum produto encontrado.
                           </td>
