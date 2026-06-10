@@ -2180,6 +2180,8 @@ export function DashmarketDashboard() {
     title: ""
   });
   const [hiddenSkus, setHiddenSkus] = useState<string[]>([]);
+  const [showNewProductForm, setShowNewProductForm] = useState(false);
+  const [newProductDraft, setNewProductDraft] = useState({ sku: "", name: "" });
   const [isSavingProduct, setIsSavingProduct] = useState(false);
   const [isSavingCalculatorCosts, setIsSavingCalculatorCosts] = useState(false);
   const [isResettingCalculatorCosts, setIsResettingCalculatorCosts] =
@@ -5119,6 +5121,53 @@ export function DashmarketDashboard() {
       taxPercentage: "",
       adTacosPercentage: ""
     }));
+  }
+
+  function createNewCalculatorProduct() {
+    const sku = newProductDraft.sku.trim();
+    const name = newProductDraft.name.trim();
+
+    if (!sku) {
+      setDataMessage("Informe o SKU do novo produto.");
+      return;
+    }
+
+    const skuExists =
+      productOptions.some((product) => product.sku === sku) ||
+      realProducts.some((product) => product.internal_sku === sku) ||
+      activeSales.some((sale) => sale.sku === sku);
+
+    if (skuExists) {
+      setDataMessage(`O SKU ${sku} ja existe. Selecione-o na lista para editar.`);
+      return;
+    }
+
+    setHiddenSkus((current) => current.filter((hiddenSku) => hiddenSku !== sku));
+    setSelectedPreset("custom");
+    setCalculatorForm((current) => ({
+      ...current,
+      sku,
+      name: name || sku,
+      productCost: "",
+      sellingPrice: "",
+      commissionPercentage: "16",
+      fixedFee: "",
+      shippingCost: "",
+      packagingCost: "",
+      collectionCost: "",
+      storageCost: "",
+      operationalCost: "",
+      taxPercentage: "",
+      adTacosPercentage: "",
+      affiliateCommissionPercentage: "",
+      promotionCredit: "",
+      desiredProfitMargin: "15",
+      desiredFixedProfit: "",
+      validFrom: dateOnly(new Date())
+    }));
+    setNewProductDraft({ sku: "", name: "" });
+    setShowNewProductForm(false);
+    setDataMessage(`Novo produto ${sku} pronto para calculo. Preencha os custos e salve.`);
   }
 
   function importSaleToCalculator(sale: SalesDetailRow) {
@@ -9904,6 +9953,57 @@ export function DashmarketDashboard() {
                           value={calculatorForm.name}
                         />
                       </label>
+                    </div>
+
+                    {/* Criar novo produto */}
+                    <div>
+                      {!showNewProductForm ? (
+                        <button
+                          className="h-9 rounded-lg border border-dashed border-slate-300 px-3 text-xs font-bold text-slate-600 transition hover:border-sea hover:text-sea"
+                          onClick={() => setShowNewProductForm(true)}
+                          type="button"
+                        >
+                          + Novo produto
+                        </button>
+                      ) : (
+                        <div className="grid gap-3 rounded-lg border border-slate-200 bg-slate-50/50 p-3 sm:grid-cols-[1fr_2fr_auto_auto]">
+                          <label className="grid gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-500">
+                            Novo SKU
+                            <input
+                              className="h-10 rounded-lg border border-slate-200 bg-paper px-3 text-sm font-normal outline-none focus:ring-4 focus:ring-sea/20"
+                              onChange={(e) => setNewProductDraft((d) => ({ ...d, sku: e.target.value }))}
+                              placeholder="Ex: NOVO-PROD-01"
+                              value={newProductDraft.sku}
+                            />
+                          </label>
+                          <label className="grid gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-500">
+                            Nome do produto
+                            <input
+                              className="h-10 rounded-lg border border-slate-200 bg-paper px-3 text-sm font-normal outline-none focus:ring-4 focus:ring-sea/20"
+                              onChange={(e) => setNewProductDraft((d) => ({ ...d, name: e.target.value }))}
+                              placeholder="Título do produto"
+                              value={newProductDraft.name}
+                            />
+                          </label>
+                          <button
+                            className="h-10 self-end rounded-lg bg-sea px-4 text-sm font-bold text-white transition hover:bg-sea/90"
+                            onClick={createNewCalculatorProduct}
+                            type="button"
+                          >
+                            Criar
+                          </button>
+                          <button
+                            className="h-10 self-end rounded-lg border border-slate-200 px-4 text-sm font-bold text-slate-600 transition hover:bg-slate-100"
+                            onClick={() => {
+                              setShowNewProductForm(false);
+                              setNewProductDraft({ sku: "", name: "" });
+                            }}
+                            type="button"
+                          >
+                            Cancelar
+                          </button>
+                        </div>
+                      )}
                     </div>
 
                     {/* Marketplace preset */}
