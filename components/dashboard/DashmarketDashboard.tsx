@@ -70,6 +70,7 @@ type ProductRow = {
   internal_sku: string;
   title: string;
   status: ProductStatus;
+  reference_price?: number | string | null;
 };
 
 type MarketplaceListingStatusRow = {
@@ -3445,6 +3446,31 @@ export function DashmarketDashboard() {
             .reduce((total, cost) => total + cost.amount, 0);
           const units = sale?.units ?? 0;
           const grossRevenue = sale?.grossRevenue ?? 0;
+          const realProduct = realProducts.find(
+            (current) => current.internal_sku === product.sku
+          );
+          const referencePrice = numberFromDb(realProduct?.reference_price);
+          const hasUnitSales = units > 0;
+
+          // Sem vendas registradas, usa o preco de venda salvo na calculadora
+          // (reference_price) para que a margem nao fique zerada.
+          const averagePrice = hasUnitSales
+            ? unitMetrics?.averagePrice ?? grossRevenue / units
+            : referencePrice;
+
+          let contributionMargin = unitMetrics?.contributionMarginUnit ?? 0;
+          let contributionMarginRate = unitMetrics?.contributionMarginRate ?? 0;
+
+          if (!hasUnitSales && averagePrice > 0) {
+            contributionMargin =
+              averagePrice -
+              productCost -
+              packagingCost -
+              operationalCost -
+              averagePrice * (taxPercentage / 100) -
+              averagePrice * (advertisingTacosPercentage / 100);
+            contributionMarginRate = contributionMargin / averagePrice;
+          }
 
           return {
             sku: product.sku,
@@ -3452,20 +3478,19 @@ export function DashmarketDashboard() {
             units,
             orders: sale?.orders ?? 0,
             grossRevenue,
-            averagePrice:
-              unitMetrics?.averagePrice ?? (units > 0 ? grossRevenue / units : 0),
+            averagePrice,
             productCost,
             packagingCost,
             operationalCost,
             taxPercentage,
             advertisingCost: unitMetrics?.manualAdvertisingUnit ?? 0,
             advertisingTacosPercentage,
-            contributionMargin: unitMetrics?.contributionMarginUnit ?? 0,
-            contributionMarginRate: unitMetrics?.contributionMarginRate ?? 0
+            contributionMargin,
+            contributionMarginRate
           };
         })
         .sort((current, next) => current.title.localeCompare(next.title, "pt-BR")),
-    [activeSales, calculatedProductOptions, costs, productUnitRows]
+    [activeSales, calculatedProductOptions, costs, productUnitRows, realProducts]
   );
 
   const filteredCostCenterProductRows = useMemo(() => {
@@ -3690,7 +3715,7 @@ export function DashmarketDashboard() {
 
     const { data: productsData, error: productsError } = await supabaseClient
       .from("products")
-      .select("id, internal_sku, title, status")
+      .select("id, internal_sku, title, status, reference_price")
       .eq("organization_id", organizationId)
       .neq("status", "archived")
       .order("internal_sku", { ascending: true });
@@ -5497,6 +5522,16 @@ export function DashmarketDashboard() {
           calculatorForm.name || calculatorForm.sku
         );
 
+        const referencePrice =
+          calculatorResult?.sellingPrice ?? numberFromInput(calculatorForm.sellingPrice);
+
+        const { error: priceError } = await supabaseClient
+          .from("products")
+          .update({ reference_price: referencePrice > 0 ? referencePrice : null })
+          .eq("id", product.id);
+
+        if (priceError) throw priceError;
+
         // Remove TODOS os custos do produto (não só os gerenciados pela calculadora)
         // para garantir limpeza completa antes de reinserir, inclusive custos customizados
         // que poderiam causar cálculos incorretos ao reutilizar um produto reativado.
@@ -5535,7 +5570,8 @@ export function DashmarketDashboard() {
             id: product.id,
             internal_sku: product.internal_sku,
             title: calculatorForm.name || product.title || product.internal_sku,
-            status: "active" as ProductStatus
+            status: "active" as ProductStatus,
+            reference_price: referencePrice > 0 ? referencePrice : null
           };
 
           if (
