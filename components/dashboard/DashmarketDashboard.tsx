@@ -3582,7 +3582,11 @@ export function DashmarketDashboard() {
             packagingCost,
             operationalCost,
             taxPercentage,
-            advertisingCost: unitMetrics?.manualAdvertisingUnit ?? 0,
+            // Sem vendas, o investimento em ADS/TACOS por unidade e estimado a
+            // partir do preco de referencia (preco x %TACOS), igual a calculadora.
+            advertisingCost: hasUnitSales
+              ? unitMetrics?.manualAdvertisingUnit ?? 0
+              : averagePrice * (advertisingTacosPercentage / 100),
             advertisingTacosPercentage,
             contributionMargin,
             contributionMarginRate
@@ -3821,7 +3825,7 @@ export function DashmarketDashboard() {
 
     const { data: productsData, error: productsError } = await supabaseClient
       .from("products")
-      .select("id, internal_sku, title, status, reference_price, reference_net_profit, reference_profit_margin")
+      .select("id, internal_sku, title, status")
       .eq("organization_id", organizationId)
       .neq("status", "archived")
       .order("internal_sku", { ascending: true });
@@ -5660,21 +5664,10 @@ export function DashmarketDashboard() {
           calculatorForm.name || calculatorForm.sku
         );
 
-        const referencePrice =
-          calculatorResult?.sellingPrice ?? numberFromInput(calculatorForm.sellingPrice);
-        const referenceNetProfit = calculatorResult?.netProfit ?? null;
-        const referenceProfitMargin = calculatorResult?.profitMargin ?? null;
-
-        const { error: priceError } = await supabaseClient
-          .from("products")
-          .update({
-            reference_price: referencePrice > 0 ? referencePrice : null,
-            reference_net_profit: referenceNetProfit,
-            reference_profit_margin: referenceProfitMargin
-          })
-          .eq("id", product.id);
-
-        if (priceError) throw priceError;
+        // O resultado da calculadora (preco, lucro e margem) ja foi gravado em
+        // localStorage (calculatorResults), que e a fonte usada pelo Centro de
+        // Custos. Nao gravamos colunas reference_* no banco para nao depender de
+        // migracao e nao quebrar o save caso as colunas nao existam.
 
         // Remove TODOS os custos do produto (não só os gerenciados pela calculadora)
         // para garantir limpeza completa antes de reinserir, inclusive custos customizados
@@ -5714,10 +5707,7 @@ export function DashmarketDashboard() {
             id: product.id,
             internal_sku: product.internal_sku,
             title: calculatorForm.name || product.title || product.internal_sku,
-            status: "active" as ProductStatus,
-            reference_price: referencePrice > 0 ? referencePrice : null,
-            reference_net_profit: referenceNetProfit,
-            reference_profit_margin: referenceProfitMargin
+            status: "active" as ProductStatus
           };
 
           if (
