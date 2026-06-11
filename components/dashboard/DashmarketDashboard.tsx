@@ -71,6 +71,8 @@ type ProductRow = {
   title: string;
   status: ProductStatus;
   reference_price?: number | string | null;
+  reference_net_profit?: number | string | null;
+  reference_profit_margin?: number | string | null;
 };
 
 type MarketplaceListingStatusRow = {
@@ -3462,14 +3464,25 @@ export function DashmarketDashboard() {
           let contributionMarginRate = unitMetrics?.contributionMarginRate ?? 0;
 
           if (!hasUnitSales && averagePrice > 0) {
-            contributionMargin =
-              averagePrice -
-              productCost -
-              packagingCost -
-              operationalCost -
-              averagePrice * (taxPercentage / 100) -
-              averagePrice * (advertisingTacosPercentage / 100);
-            contributionMarginRate = contributionMargin / averagePrice;
+            // Usa o lucro/margem ja calculados pela Calculadora de Custos (que
+            // consideram comissao, frete, tarifa fixa e comissao de afiliado)
+            // para que a margem exibida bata com o "Resultado" da calculadora.
+            if (
+              realProduct?.reference_net_profit != null &&
+              realProduct?.reference_profit_margin != null
+            ) {
+              contributionMargin = numberFromDb(realProduct.reference_net_profit);
+              contributionMarginRate = numberFromDb(realProduct.reference_profit_margin);
+            } else {
+              contributionMargin =
+                averagePrice -
+                productCost -
+                packagingCost -
+                operationalCost -
+                averagePrice * (taxPercentage / 100) -
+                averagePrice * (advertisingTacosPercentage / 100);
+              contributionMarginRate = contributionMargin / averagePrice;
+            }
           }
 
           return {
@@ -3715,7 +3728,7 @@ export function DashmarketDashboard() {
 
     const { data: productsData, error: productsError } = await supabaseClient
       .from("products")
-      .select("id, internal_sku, title, status, reference_price")
+      .select("id, internal_sku, title, status, reference_price, reference_net_profit, reference_profit_margin")
       .eq("organization_id", organizationId)
       .neq("status", "archived")
       .order("internal_sku", { ascending: true });
@@ -5524,10 +5537,16 @@ export function DashmarketDashboard() {
 
         const referencePrice =
           calculatorResult?.sellingPrice ?? numberFromInput(calculatorForm.sellingPrice);
+        const referenceNetProfit = calculatorResult?.netProfit ?? null;
+        const referenceProfitMargin = calculatorResult?.profitMargin ?? null;
 
         const { error: priceError } = await supabaseClient
           .from("products")
-          .update({ reference_price: referencePrice > 0 ? referencePrice : null })
+          .update({
+            reference_price: referencePrice > 0 ? referencePrice : null,
+            reference_net_profit: referenceNetProfit,
+            reference_profit_margin: referenceProfitMargin
+          })
           .eq("id", product.id);
 
         if (priceError) throw priceError;
@@ -5571,7 +5590,9 @@ export function DashmarketDashboard() {
             internal_sku: product.internal_sku,
             title: calculatorForm.name || product.title || product.internal_sku,
             status: "active" as ProductStatus,
-            reference_price: referencePrice > 0 ? referencePrice : null
+            reference_price: referencePrice > 0 ? referencePrice : null,
+            reference_net_profit: referenceNetProfit,
+            reference_profit_margin: referenceProfitMargin
           };
 
           if (
