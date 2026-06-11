@@ -2214,7 +2214,7 @@ export function DashmarketDashboard() {
     affiliateCommissionPercentage: "",
     promotionCredit: "",
     desiredProfitMargin: "15",
-    desiredFixedProfit: "",
+    desiredFixedProfit: "10",
     validFrom: dateOnly(new Date())
   });
   const [alertThreshold, setAlertThreshold] = useState(15);
@@ -5226,6 +5226,7 @@ export function DashmarketDashboard() {
 
     setHiddenSkus((current) => current.filter((hiddenSku) => hiddenSku !== sku));
     setSelectedPreset("custom");
+    setCalculatorMode("price");
     setCalculatorForm((current) => ({
       ...current,
       sku,
@@ -5244,7 +5245,7 @@ export function DashmarketDashboard() {
       affiliateCommissionPercentage: "",
       promotionCredit: "",
       desiredProfitMargin: "15",
-      desiredFixedProfit: "",
+      desiredFixedProfit: "10",
       validFrom: dateOnly(new Date())
     }));
     setNewProductDraft({ sku: "", name: "" });
