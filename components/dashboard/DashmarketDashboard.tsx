@@ -331,7 +331,7 @@ type SalesDetailRow = SalesDetailSourceRow & {
 type CostCalculatorMode = "margin" | "price" | "fixedProfit";
 
 type MarketplacePresetId =
-  | "ml-classico" | "ml-premium" | "ml-premium-full"
+  | "mercado-livre"
   | "shopee-ate80" | "shopee-80-200" | "shopee-200-500"
   | "amazon" | "magalu" | "americanas" | "custom";
 
@@ -344,9 +344,7 @@ type MarketplacePreset = {
 };
 
 const MARKETPLACE_PRESETS: MarketplacePreset[] = [
-  { id: "ml-classico",      label: "ML Clássico",          commission: 11, fixedFee: 0 },
-  { id: "ml-premium",       label: "ML Premium",           commission: 16, fixedFee: 0 },
-  { id: "ml-premium-full",  label: "ML Premium Full",      commission: 16, fixedFee: 0, hint: "Inclua coleta e armazenagem" },
+  { id: "mercado-livre",    label: "Mercado Livre",        commission: 16, fixedFee: 0 },
   { id: "shopee-ate80",     label: "Shopee (até R$79)",    commission: 20, fixedFee: 4 },
   { id: "shopee-80-200",    label: "Shopee (R$80–R$199)",  commission: 14, fixedFee: 16 },
   { id: "shopee-200-500",   label: "Shopee (R$200–R$499)", commission: 14, fixedFee: 26 },
@@ -363,9 +361,7 @@ function getShopeePreset(price: number): MarketplacePresetId {
 }
 
 const MARKETPLACE_GROUPS: Record<MarketplacePresetId, string> = {
-  "ml-classico": "Mercado Livre",
-  "ml-premium": "Mercado Livre",
-  "ml-premium-full": "Mercado Livre",
+  "mercado-livre": "Mercado Livre",
   "shopee-ate80": "Shopee",
   "shopee-80-200": "Shopee",
   "shopee-200-500": "Shopee",
@@ -2199,7 +2195,7 @@ export function DashmarketDashboard() {
     useState<MercadoLivreDiagnosticsResponse | null>(null);
   const [calculatorMode, setCalculatorMode] =
     useState<CostCalculatorMode>("margin");
-  const [selectedPreset, setSelectedPreset] = useState<MarketplacePresetId>("ml-premium");
+  const [selectedPreset, setSelectedPreset] = useState<MarketplacePresetId>("mercado-livre");
   const [calculatorTab, setCalculatorTab] = useState<"calc" | "alerts" | "simulator" | "promo" | "pareto">("calc");
   const [calculatorForm, setCalculatorForm] = useState<CostCalculatorFormState>({
     sku: salesSeed[0].sku,
@@ -3713,21 +3709,27 @@ export function DashmarketDashboard() {
 
     if (listingStatusesError) throw listingStatusesError;
 
+    const listingRows = (listingStatuses ?? []) as MarketplaceListingStatusRow[];
+    const listedSkus = new Set(listingRows.map((listing) => listing.seller_sku));
     const activeListingSkus = new Set(
-      ((listingStatuses ?? []) as MarketplaceListingStatusRow[])
+      listingRows
         .filter((listing) => listing.status === "active")
         .map((listing) => listing.seller_sku)
     );
 
-    const mappedProducts =
-      activeListingSkus.size > 0
-        ? products.map((product) => ({
+    // So sobrescreve o status de produtos que possuem anuncio no Mercado Livre.
+    // Produtos criados manualmente na Calculadora (sem anuncio) mantem o status
+    // gravado no banco, evitando que sumam da lista apos recarregar a pagina.
+    const mappedProducts = products.map((product) =>
+      listedSkus.has(product.internal_sku)
+        ? {
             ...product,
             status: (
               activeListingSkus.has(product.internal_sku) ? "active" : "paused"
             ) as ProductStatus
-          }))
-        : products;
+          }
+        : product
+    );
     setRealProducts(mappedProducts);
 
     const { data: costsData, error: costsError } = await supabaseClient
