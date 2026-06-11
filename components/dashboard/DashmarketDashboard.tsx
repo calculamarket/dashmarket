@@ -3483,7 +3483,7 @@ export function DashmarketDashboard() {
 
       const matchesMarketplace =
         costMarketplaceFilter === "all" ||
-        (productMarketplaces[product.sku] ?? "Outro") === costMarketplaceFilter;
+        (productMarketplaces[product.sku] ?? "Mercado Livre") === costMarketplaceFilter;
 
       return matchesQuery && matchesMarketplace;
     });
@@ -10716,7 +10716,7 @@ export function DashmarketDashboard() {
                                   [product.sku]: event.target.value
                                 }))
                               }
-                              value={productMarketplaces[product.sku] ?? "Outro"}
+                              value={productMarketplaces[product.sku] ?? "Mercado Livre"}
                             >
                               {MARKETPLACE_TAGS.map((tag) => (
                                 <option key={tag} value={tag}>{tag}</option>
