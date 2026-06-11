@@ -424,6 +424,70 @@ function writeStoredProductMarketplaces(marketplaces: Record<string, string>) {
   }
 }
 
+// ─── Resultados da Calculadora de Custos ──────────────────────────────────────
+// Espelha a abordagem do dashmarket-pro: o produto calculado guarda o PROPRIO
+// resultado (preco, lucro liquido e margem) e a tabela do Centro de Custos exibe
+// esse valor diretamente, sem recalcular a partir das vendas. Persistido em
+// localStorage para nao depender de migracao/colunas novas no Supabase.
+const CALCULATOR_RESULTS_STORAGE_KEY = "dashmarket:calculator-results";
+
+type StoredCalculatorResult = {
+  sellingPrice: number;
+  netProfit: number;
+  profitMargin: number; // razao 0-1
+};
+
+function readStoredCalculatorResults(): Record<string, StoredCalculatorResult> {
+  if (typeof window === "undefined") return {};
+
+  try {
+    const stored = window.localStorage.getItem(CALCULATOR_RESULTS_STORAGE_KEY);
+    if (!stored) return {};
+
+    const parsed = JSON.parse(stored) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return {};
+    }
+
+    return Object.entries(parsed as Record<string, unknown>).reduce<
+      Record<string, StoredCalculatorResult>
+    >((acc, [sku, value]) => {
+      if (
+        sku &&
+        value &&
+        typeof value === "object" &&
+        !Array.isArray(value)
+      ) {
+        const record = value as Record<string, unknown>;
+        acc[sku] = {
+          sellingPrice: Number(record.sellingPrice ?? 0) || 0,
+          netProfit: Number(record.netProfit ?? 0) || 0,
+          profitMargin: Number(record.profitMargin ?? 0) || 0
+        };
+      }
+
+      return acc;
+    }, {});
+  } catch {
+    return {};
+  }
+}
+
+function writeStoredCalculatorResults(
+  results: Record<string, StoredCalculatorResult>
+) {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.localStorage.setItem(
+      CALCULATOR_RESULTS_STORAGE_KEY,
+      JSON.stringify(results)
+    );
+  } catch {
+    // Mantem os resultados em memoria se o storage estiver bloqueado.
+  }
+}
+
 type CostCalculatorFormState = {
   sku: string;
   name: string;
@@ -2247,6 +2311,9 @@ export function DashmarketDashboard() {
   const [productMarketplaces, setProductMarketplaces] = useState<Record<string, string>>(() =>
     readStoredProductMarketplaces()
   );
+  const [calculatorResults, setCalculatorResults] = useState<
+    Record<string, StoredCalculatorResult>
+  >(() => readStoredCalculatorResults());
   const [costMarketplaceFilter, setCostMarketplaceFilter] = useState("all");
   const [isSavingProduct, setIsSavingProduct] = useState(false);
   const [isSavingCalculatorCosts, setIsSavingCalculatorCosts] = useState(false);
@@ -2508,6 +2575,10 @@ export function DashmarketDashboard() {
   useEffect(() => {
     writeStoredProductMarketplaces(productMarketplaces);
   }, [productMarketplaces]);
+
+  useEffect(() => {
+    writeStoredCalculatorResults(calculatorResults);
+  }, [calculatorResults]);
 
   const selectedAdapter = getMarketplaceAdapter(selectedProvider);
   const mercadoLivreAccount = marketplaceAccounts.find(
@@ -3451,11 +3522,27 @@ export function DashmarketDashboard() {
           const realProduct = realProducts.find(
             (current) => current.internal_sku === product.sku
           );
-          const referencePrice = numberFromDb(realProduct?.reference_price);
           const hasUnitSales = units > 0;
 
+          // Resultado exato salvo pela calculadora (localStorage) ou colunas do
+          // banco — espelha a abordagem do dashmarket-pro: a tabela mostra o que
+          // a calculadora calculou, sem reconstruir a partir das vendas.
+          const cachedResult = calculatorResults[product.sku];
+          const referencePrice =
+            cachedResult?.sellingPrice ?? numberFromDb(realProduct?.reference_price);
+          const referenceNetProfit =
+            cachedResult?.netProfit ??
+            (realProduct?.reference_net_profit != null
+              ? numberFromDb(realProduct.reference_net_profit)
+              : null);
+          const referenceProfitMargin =
+            cachedResult?.profitMargin ??
+            (realProduct?.reference_profit_margin != null
+              ? numberFromDb(realProduct.reference_profit_margin)
+              : null);
+
           // Sem vendas registradas, usa o preco de venda salvo na calculadora
-          // (reference_price) para que a margem nao fique zerada.
+          // para que a margem nao fique zerada.
           const averagePrice = hasUnitSales
             ? unitMetrics?.averagePrice ?? grossRevenue / units
             : referencePrice;
@@ -3463,17 +3550,16 @@ export function DashmarketDashboard() {
           let contributionMargin = unitMetrics?.contributionMarginUnit ?? 0;
           let contributionMarginRate = unitMetrics?.contributionMarginRate ?? 0;
 
-          if (!hasUnitSales && averagePrice > 0) {
-            // Usa o lucro/margem ja calculados pela Calculadora de Custos (que
-            // consideram comissao, frete, tarifa fixa e comissao de afiliado)
-            // para que a margem exibida bata com o "Resultado" da calculadora.
-            if (
-              realProduct?.reference_net_profit != null &&
-              realProduct?.reference_profit_margin != null
-            ) {
-              contributionMargin = numberFromDb(realProduct.reference_net_profit);
-              contributionMarginRate = numberFromDb(realProduct.reference_profit_margin);
-            } else {
+          if (!hasUnitSales) {
+            // Prioridade: resultado completo da calculadora (que ja considera
+            // comissao, frete, tarifa fixa e comissao de afiliado), garantindo
+            // que a margem exibida bata exatamente com o "Resultado".
+            if (referenceNetProfit != null && referenceProfitMargin != null) {
+              contributionMargin = referenceNetProfit;
+              contributionMarginRate = referenceProfitMargin;
+            } else if (averagePrice > 0) {
+              // Fallback parcial (apenas custos cadastrados) quando nao ha
+              // resultado salvo — pode divergir da calculadora.
               contributionMargin =
                 averagePrice -
                 productCost -
@@ -3503,7 +3589,14 @@ export function DashmarketDashboard() {
           };
         })
         .sort((current, next) => current.title.localeCompare(next.title, "pt-BR")),
-    [activeSales, calculatedProductOptions, costs, productUnitRows, realProducts]
+    [
+      activeSales,
+      calculatedProductOptions,
+      calculatorResults,
+      costs,
+      productUnitRows,
+      realProducts
+    ]
   );
 
   const filteredCostCenterProductRows = useMemo(() => {
@@ -5472,6 +5565,12 @@ export function DashmarketDashboard() {
         setCosts((current) =>
           current.filter((cost) => cost.sku !== product.sku)
         );
+        setCalculatorResults((current) => {
+          if (!(product.sku in current)) return current;
+          const next = { ...current };
+          delete next[product.sku];
+          return next;
+        });
 
         if (editingProductSku === product.sku) {
           cancelProductEditing();
@@ -5509,6 +5608,12 @@ export function DashmarketDashboard() {
       current.includes(product.sku) ? current : [...current, product.sku]
     );
     setCosts((current) => current.filter((cost) => cost.sku !== product.sku));
+    setCalculatorResults((current) => {
+      if (!(product.sku in current)) return current;
+      const next = { ...current };
+      delete next[product.sku];
+      return next;
+    });
 
     if (editingProductSku === product.sku) {
       cancelProductEditing();
@@ -5524,6 +5629,26 @@ export function DashmarketDashboard() {
       setDataMessage("Selecione um SKU para salvar os custos internos.");
       return;
     }
+
+    // Guarda o resultado exato da calculadora (preco, lucro e margem) para que o
+    // Centro de Custos exiba o mesmo valor, sem recalcular a partir das vendas.
+    // Funciona em ambos os fluxos (Supabase e demo) e nao depende de migracao.
+    const storedResult: StoredCalculatorResult = {
+      sellingPrice:
+        calculatorResult?.sellingPrice ??
+        numberFromInput(calculatorForm.sellingPrice),
+      netProfit: calculatorResult?.netProfit ?? 0,
+      profitMargin: calculatorResult?.profitMargin ?? 0
+    };
+    setCalculatorResults((current) => {
+      if (calculatorResult) {
+        return { ...current, [calculatorForm.sku]: storedResult };
+      }
+      // Sem resultado valido (campos incompletos): remove qualquer cache antigo.
+      const next = { ...current };
+      delete next[calculatorForm.sku];
+      return next;
+    });
 
     if (supabaseClient && organization) {
       setIsSavingCalculatorCosts(true);
@@ -5670,6 +5795,7 @@ export function DashmarketDashboard() {
         setCosts((current) =>
           current.filter((cost) => !isCalculatorManagedCost(cost))
         );
+        setCalculatorResults({});
         await loadCostCenter(organization.id);
         setDataMessage(
           "Produtos calculados antigos excluidos. A partir de agora, somente SKUs recalculados pela Calculadora aparecerao nas analises unitarias."
@@ -5690,6 +5816,7 @@ export function DashmarketDashboard() {
     setCosts((current) =>
       current.filter((cost) => !isCalculatorManagedCost(cost))
     );
+    setCalculatorResults({});
     setDataMessage(
       "Produtos calculados simulados excluidos. Recalcule os SKUs que deseja acompanhar."
     );
