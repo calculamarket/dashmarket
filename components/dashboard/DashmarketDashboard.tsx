@@ -3949,6 +3949,9 @@ export function DashmarketDashboard() {
         setListingAnalytics([]);
         setListingAlerts([]);
         setProductOpportunities([]);
+        setDataMessage(
+          "Analise de Anuncios pronta, mas as tabelas ainda nao existem no Supabase. Aplique a migracao 20260529000000_ad_listing_analysis.sql."
+        );
         return;
       }
 
