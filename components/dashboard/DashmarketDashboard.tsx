@@ -5340,7 +5340,7 @@ export function DashmarketDashboard() {
     }));
   }
 
-  function createNewCalculatorProduct() {
+  async function createNewCalculatorProduct() {
     const sku = newProductDraft.sku.trim();
     const name = newProductDraft.name.trim();
 
@@ -5385,7 +5385,39 @@ export function DashmarketDashboard() {
     }));
     setNewProductDraft({ sku: "", name: "" });
     setShowNewProductForm(false);
-    setDataMessage(`Novo produto ${sku} pronto para calculo. Preencha os custos e salve.`);
+
+    // Persiste o produto imediatamente no banco para que fique gravado assim que
+    // criado (aparecendo na lista de SKUs), mesmo antes de aplicar os custos.
+    if (supabaseClient && organization) {
+      setIsSavingProduct(true);
+      try {
+        const product = await ensureProductForSku(sku, name || sku);
+        setRealProducts((current) =>
+          current.some(
+            (currentProduct) =>
+              currentProduct.internal_sku === product.internal_sku
+          )
+            ? current
+            : [...current, product]
+        );
+        setDataMessage(
+          `Novo produto ${sku} criado e gravado. Preencha os custos e clique em "Aplicar custos internos".`
+        );
+      } catch (error) {
+        setDataMessage(
+          error instanceof Error
+            ? error.message
+            : "Nao foi possivel gravar o novo produto."
+        );
+      } finally {
+        setIsSavingProduct(false);
+      }
+      return;
+    }
+
+    setDataMessage(
+      `Novo produto ${sku} pronto para calculo (modo demo). Preencha os custos e salve.`
+    );
   }
 
   function importSaleToCalculator(sale: SalesDetailRow) {
@@ -10247,11 +10279,12 @@ export function DashmarketDashboard() {
                             />
                           </label>
                           <button
-                            className="h-10 self-end rounded-lg bg-sea px-4 text-sm font-bold text-white transition hover:bg-sea/90"
+                            className="h-10 self-end rounded-lg bg-sea px-4 text-sm font-bold text-white transition hover:bg-sea/90 disabled:opacity-50"
+                            disabled={isSavingProduct}
                             onClick={createNewCalculatorProduct}
                             type="button"
                           >
-                            Criar
+                            {isSavingProduct ? "Criando..." : "Criar"}
                           </button>
                           <button
                             className="h-10 self-end rounded-lg border border-slate-200 px-4 text-sm font-bold text-slate-600 transition hover:bg-slate-100"
