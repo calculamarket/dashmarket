@@ -5421,12 +5421,18 @@ export function DashmarketDashboard() {
 
     // Persiste o produto imediatamente no banco para que fique gravado assim que
     // criado (aparecendo na lista de SKUs), mesmo antes de aplicar os custos.
-    if (supabaseClient) {
+    // Como o cliente Supabase usa config default (sempre nao-nulo), a SESSAO e o
+    // que distingue logado de demo.
+    const session = supabaseClient
+      ? (await supabaseClient.auth.getSession()).data.session
+      : null;
+
+    if (supabaseClient && session) {
       setIsSavingProduct(true);
       try {
         const org = await resolveOrganization();
 
-        // Autenticado porem sem empresa carregada: NAO grava so localmente (o que
+        // Logado porem sem empresa carregada: NAO grava so localmente (o que
         // faria o SKU sumir apos recarregar). Avisa para o usuario reconectar.
         if (!org) {
           setDataMessage(
@@ -5730,20 +5736,25 @@ export function DashmarketDashboard() {
       return next;
     });
 
-    if (supabaseClient) {
+    // Como o cliente Supabase usa uma config default (sempre nao-nulo), o que
+    // distingue "logado" de "demo" e a SESSAO. So grava no banco com sessao.
+    const sessionData = supabaseClient
+      ? (await supabaseClient.auth.getSession()).data.session
+      : null;
+
+    if (supabaseClient && sessionData) {
       setIsSavingCalculatorCosts(true);
       setDataMessage(null);
 
       try {
         const org = await resolveOrganization();
 
-        // Autenticado mas sem empresa: nao salva so localmente (sumiria ao
+        // Logado mas sem empresa: nao salva so localmente (sumiria ao
         // recarregar). Avisa o usuario em vez de mascarar como sucesso.
         if (!org) {
           setDataMessage(
             `Nao foi possivel identificar sua empresa para salvar os custos do SKU ${calculatorForm.sku}. Recarregue a pagina e tente novamente.`
           );
-          setIsSavingCalculatorCosts(false);
           return;
         }
 
