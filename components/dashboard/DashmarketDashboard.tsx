@@ -5197,8 +5197,41 @@ export function DashmarketDashboard() {
     setDataMessage("Emprestimo removido em modo demonstracao.");
   }
 
-  async function ensureProductForSku(sku: string, title: string) {
-    if (!supabaseClient || !organization) {
+  // Resolve a empresa do usuario mesmo que o estado `organization` ainda nao
+  // tenha sido populado (ex.: race no carregamento ou refresh de token). Evita
+  // que gravacoes caiam silenciosamente no modo local quando o usuario esta
+  // autenticado mas o estado da empresa esta temporariamente nulo.
+  async function resolveOrganization(): Promise<Organization | null> {
+    if (organization) return organization;
+    if (!supabaseClient) return null;
+
+    try {
+      const { data: sessionData } = await supabaseClient.auth.getSession();
+      if (!sessionData.session) return null;
+
+      const { data, error } = await supabaseClient
+        .from("organizations")
+        .select("id, name, slug")
+        .order("created_at", { ascending: true })
+        .limit(1);
+
+      if (error) throw error;
+
+      const org = ((data ?? [])[0] as Organization | undefined) ?? null;
+      if (org) setOrganization(org);
+      return org;
+    } catch {
+      return null;
+    }
+  }
+
+  async function ensureProductForSku(
+    sku: string,
+    title: string,
+    orgOverride?: Organization
+  ) {
+    const org = orgOverride ?? organization;
+    if (!supabaseClient || !org) {
       throw new Error("Entre no DASHMARKET antes de salvar SKUs.");
     }
 
@@ -5212,7 +5245,7 @@ export function DashmarketDashboard() {
       await supabaseClient
         .from("products")
         .select("id, internal_sku, title, status")
-        .eq("organization_id", organization.id)
+        .eq("organization_id", org.id)
         .eq("internal_sku", sku)
         .maybeSingle();
 
@@ -5238,7 +5271,7 @@ export function DashmarketDashboard() {
     const { data: insertedProduct, error: productError } = await supabaseClient
       .from("products")
       .insert({
-        organization_id: organization.id,
+        organization_id: org.id,
         internal_sku: sku,
         title: title || sku,
         status: "active"
@@ -5388,10 +5421,21 @@ export function DashmarketDashboard() {
 
     // Persiste o produto imediatamente no banco para que fique gravado assim que
     // criado (aparecendo na lista de SKUs), mesmo antes de aplicar os custos.
-    if (supabaseClient && organization) {
+    if (supabaseClient) {
       setIsSavingProduct(true);
       try {
-        const product = await ensureProductForSku(sku, name || sku);
+        const org = await resolveOrganization();
+
+        // Autenticado porem sem empresa carregada: NAO grava so localmente (o que
+        // faria o SKU sumir apos recarregar). Avisa para o usuario reconectar.
+        if (!org) {
+          setDataMessage(
+            `Nao foi possivel identificar sua empresa para gravar o SKU ${sku}. Recarregue a pagina (ou entre novamente) e tente outra vez.`
+          );
+          return;
+        }
+
+        const product = await ensureProductForSku(sku, name || sku, org);
         setRealProducts((current) =>
           current.some(
             (currentProduct) =>
@@ -5686,14 +5730,27 @@ export function DashmarketDashboard() {
       return next;
     });
 
-    if (supabaseClient && organization) {
+    if (supabaseClient) {
       setIsSavingCalculatorCosts(true);
       setDataMessage(null);
 
       try {
+        const org = await resolveOrganization();
+
+        // Autenticado mas sem empresa: nao salva so localmente (sumiria ao
+        // recarregar). Avisa o usuario em vez de mascarar como sucesso.
+        if (!org) {
+          setDataMessage(
+            `Nao foi possivel identificar sua empresa para salvar os custos do SKU ${calculatorForm.sku}. Recarregue a pagina e tente novamente.`
+          );
+          setIsSavingCalculatorCosts(false);
+          return;
+        }
+
         const product = await ensureProductForSku(
           calculatorForm.sku,
-          calculatorForm.name || calculatorForm.sku
+          calculatorForm.name || calculatorForm.sku,
+          org
         );
 
         // O resultado da calculadora (preco, lucro e margem) ja foi gravado em
@@ -5707,7 +5764,7 @@ export function DashmarketDashboard() {
         const { error: deleteCostError } = await supabaseClient
           .from("sku_costs")
           .delete()
-          .eq("organization_id", organization.id)
+          .eq("organization_id", org.id)
           .eq("product_id", product.id);
 
         if (deleteCostError) throw deleteCostError;
@@ -5715,7 +5772,7 @@ export function DashmarketDashboard() {
         if (entries.length > 0) {
           const { error: costError } = await supabaseClient.from("sku_costs").insert(
             entries.map((entry) => ({
-              organization_id: organization.id,
+              organization_id: org.id,
               product_id: product.id,
               cost_name: entry.label,
               cost_category: entry.category,
@@ -5728,7 +5785,7 @@ export function DashmarketDashboard() {
           if (costError) throw costError;
         }
 
-        await loadCostCenter(organization.id);
+        await loadCostCenter(org.id);
         replaceLocalCalculatorCostsForSku(
           calculatorForm.sku,
           entries,
