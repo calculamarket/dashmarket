@@ -2518,7 +2518,10 @@ export function DashmarketDashboard() {
       }
 
       for (const product of realProducts) {
-        if (product.status !== "active" || !product.internal_sku) continue;
+        // Inclui produtos com anuncio pausado no ML (status "paused"): a
+        // Calculadora de Custos serve para qualquer SKU do vendedor, nao so os
+        // com anuncio ativo. Apenas arquivados ficam de fora.
+        if (product.status === "archived" || !product.internal_sku) continue;
         optionsBySku.set(product.internal_sku, {
           sku: product.internal_sku,
           title: product.title || product.internal_sku
