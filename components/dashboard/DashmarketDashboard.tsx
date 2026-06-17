@@ -5424,26 +5424,14 @@ export function DashmarketDashboard() {
 
     // Persiste o produto imediatamente no banco para que fique gravado assim que
     // criado (aparecendo na lista de SKUs), mesmo antes de aplicar os custos.
-    // Como o cliente Supabase usa config default (sempre nao-nulo), a SESSAO e o
-    // que distingue logado de demo.
-    const session = supabaseClient
-      ? (await supabaseClient.auth.getSession()).data.session
-      : null;
+    // Usa a empresa do estado (carregada quando logado); se nao houver, tenta
+    // resolver via Supabase (que valida a sessao). So cai no modo local quando
+    // realmente nao ha empresa/sessao.
+    const org = organization ?? (await resolveOrganization());
 
-    if (supabaseClient && session) {
+    if (supabaseClient && org) {
       setIsSavingProduct(true);
       try {
-        const org = await resolveOrganization();
-
-        // Logado porem sem empresa carregada: NAO grava so localmente (o que
-        // faria o SKU sumir apos recarregar). Avisa para o usuario reconectar.
-        if (!org) {
-          setDataMessage(
-            `Nao foi possivel identificar sua empresa para gravar o SKU ${sku}. Recarregue a pagina (ou entre novamente) e tente outra vez.`
-          );
-          return;
-        }
-
         const product = await ensureProductForSku(sku, name || sku, org);
         setRealProducts((current) =>
           current.some(
@@ -5739,28 +5727,16 @@ export function DashmarketDashboard() {
       return next;
     });
 
-    // Como o cliente Supabase usa uma config default (sempre nao-nulo), o que
-    // distingue "logado" de "demo" e a SESSAO. So grava no banco com sessao.
-    const sessionData = supabaseClient
-      ? (await supabaseClient.auth.getSession()).data.session
-      : null;
+    // Usa a empresa do estado (carregada quando logado); se nao houver, tenta
+    // resolver via Supabase (que valida a sessao). So cai no modo local quando
+    // realmente nao ha empresa/sessao.
+    const org = organization ?? (await resolveOrganization());
 
-    if (supabaseClient && sessionData) {
+    if (supabaseClient && org) {
       setIsSavingCalculatorCosts(true);
       setDataMessage(null);
 
       try {
-        const org = await resolveOrganization();
-
-        // Logado mas sem empresa: nao salva so localmente (sumiria ao
-        // recarregar). Avisa o usuario em vez de mascarar como sucesso.
-        if (!org) {
-          setDataMessage(
-            `Nao foi possivel identificar sua empresa para salvar os custos do SKU ${calculatorForm.sku}. Recarregue a pagina e tente novamente.`
-          );
-          return;
-        }
-
         const product = await ensureProductForSku(
           calculatorForm.sku,
           calculatorForm.name || calculatorForm.sku,
