@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   BarChart3,
@@ -29,6 +29,7 @@ import {
   Target,
   TrendingDown,
   TrendingUp,
+  Plus,
   Trash2,
   WalletCards
 } from "lucide-react";
@@ -1037,6 +1038,22 @@ type LoanEntryDbRow = {
   notes: string | null;
 };
 
+type LoanPayment = {
+  id: string;
+  loanId: string;
+  amount: number;
+  paidAt: string;
+  notes?: string | null;
+};
+
+type LoanPaymentDbRow = {
+  id: string;
+  loan_id: string;
+  amount: number | string;
+  paid_at: string;
+  notes: string | null;
+};
+
 const salesSeed: SaleRecord[] = [
   {
     sku: "MLB-CABO-USB-C-1M",
@@ -1802,6 +1819,16 @@ function mapLoanEntryRow(row: LoanEntryDbRow): LoanEntry {
   };
 }
 
+function mapLoanPaymentRow(row: LoanPaymentDbRow): LoanPayment {
+  return {
+    id: row.id,
+    loanId: row.loan_id,
+    amount: numberFromDb(row.amount),
+    paidAt: row.paid_at,
+    notes: row.notes
+  };
+}
+
 function resolveLoanStatus(
   status: LoanStatus,
   dueDate: string,
@@ -2374,6 +2401,16 @@ export function DashmarketDashboard() {
     startDate: dateOnly(new Date()),
     dueDate: addDays(30),
     status: "active" as LoanStatus,
+    notes: ""
+  });
+  const [loanPayments, setLoanPayments] = useState<Record<string, LoanPayment[]>>(
+    {}
+  );
+  const [payingLoanId, setPayingLoanId] = useState<string | null>(null);
+  const [isSavingLoanPayment, setIsSavingLoanPayment] = useState(false);
+  const [loanPaymentForm, setLoanPaymentForm] = useState({
+    amount: "",
+    paidAt: dateOnly(new Date()),
     notes: ""
   });
 
@@ -4281,6 +4318,34 @@ export function DashmarketDashboard() {
     setPersonalLoans(((data ?? []) as LoanEntryDbRow[]).map(mapLoanEntryRow));
   }, [supabaseClient]);
 
+  const loadLoanPayments = useCallback(async (currentUserId: string) => {
+    if (!supabaseClient) return;
+
+    const { data, error } = await supabaseClient
+      .from("loan_payments")
+      .select("id, loan_id, amount, paid_at, notes")
+      .eq("user_id", currentUserId)
+      .order("paid_at", { ascending: true })
+      .limit(5000);
+
+    if (error) {
+      // Tabela ainda nao criada (migration nao rodada): segue sem historico.
+      if (isMissingStorageSchemaError(error) || isMissingRelationError(error)) {
+        setLoanPayments({});
+        return;
+      }
+      throw error;
+    }
+
+    const grouped = ((data ?? []) as LoanPaymentDbRow[])
+      .map(mapLoanPaymentRow)
+      .reduce<Record<string, LoanPayment[]>>((acc, payment) => {
+        (acc[payment.loanId] ??= []).push(payment);
+        return acc;
+      }, {});
+    setLoanPayments(grouped);
+  }, [supabaseClient]);
+
   const loadSyncRuns = useCallback(async (organizationId: string) => {
     if (!supabaseClient) return;
 
@@ -4470,6 +4535,9 @@ export function DashmarketDashboard() {
           await loadPanelSection("Emprestimos", () =>
             loadPersonalLoans(session.user.id)
           );
+          await loadPanelSection("Pagamentos de emprestimos", () =>
+            loadLoanPayments(session.user.id)
+          );
           await loadPanelSection("Conta Mercado Livre", () =>
             loadMarketplaceAccounts(currentOrganization.id)
           );
@@ -4559,6 +4627,7 @@ export function DashmarketDashboard() {
     loadSyncRuns,
     loadPersonalFinance,
     loadPersonalLoans,
+    loadLoanPayments,
     loadPromotions,
     loadSales,
     supabaseClient
@@ -5198,6 +5267,113 @@ export function DashmarketDashboard() {
 
     setPersonalLoans((current) => current.filter((item) => item.id !== loan.id));
     setDataMessage("Emprestimo removido em modo demonstracao.");
+  }
+
+  function startLoanPayment(loan: LoanEntry) {
+    const open = Math.max(loan.principalAmount - loan.paidAmount, 0);
+    setPayingLoanId(loan.id);
+    setLoanPaymentForm({
+      amount: open > 0 ? inputNumber(open) : "",
+      paidAt: dateOnly(new Date()),
+      notes: ""
+    });
+  }
+
+  function cancelLoanPayment() {
+    setPayingLoanId(null);
+    setLoanPaymentForm({ amount: "", paidAt: dateOnly(new Date()), notes: "" });
+  }
+
+  // Recalcula paid_amount somando os pagamentos e ajusta o status no banco.
+  async function syncLoanPaidAmount(loan: LoanEntry, payments: LoanPayment[]) {
+    if (!supabaseClient || !userId) return;
+    const totalPaid = payments.reduce((sum, payment) => sum + payment.amount, 0);
+    const nextStatus: LoanStatus =
+      totalPaid >= loan.principalAmount ? "settled" : "active";
+    await supabaseClient
+      .from("personal_loans")
+      .update({ paid_amount: totalPaid, status: nextStatus })
+      .eq("id", loan.id);
+  }
+
+  async function saveLoanPayment(loan: LoanEntry) {
+    const amount = numberFromInput(loanPaymentForm.amount);
+    if (amount <= 0) {
+      setDataMessage("Informe um valor de pagamento maior que zero.");
+      return;
+    }
+
+    if (supabaseClient && userId) {
+      setIsSavingLoanPayment(true);
+      setDataMessage(null);
+
+      try {
+        const { data, error } = await supabaseClient
+          .from("loan_payments")
+          .insert({
+            loan_id: loan.id,
+            user_id: userId,
+            amount,
+            paid_at: loanPaymentForm.paidAt || dateOnly(new Date()),
+            notes: loanPaymentForm.notes || null
+          })
+          .select("id, loan_id, amount, paid_at, notes")
+          .single();
+
+        if (error) throw error;
+
+        const inserted = mapLoanPaymentRow(data as LoanPaymentDbRow);
+        const nextPayments = [...(loanPayments[loan.id] ?? []), inserted];
+        await syncLoanPaidAmount(loan, nextPayments);
+        await Promise.all([loadLoanPayments(userId), loadPersonalLoans(userId)]);
+        cancelLoanPayment();
+        setDataMessage(
+          `Pagamento de ${formatCurrency.format(amount)} registrado.`
+        );
+      } catch (error) {
+        setDataMessage(
+          isMissingStorageSchemaError(error) || isMissingRelationError(error)
+            ? "A tabela de pagamentos ainda nao existe no Supabase. Rode a migration loan_payments e tente novamente."
+            : errorMessage(error, "Nao foi possivel registrar o pagamento.")
+        );
+      } finally {
+        setIsSavingLoanPayment(false);
+      }
+
+      return;
+    }
+
+    setDataMessage("Pagamentos exigem login no DASHMARKET.");
+  }
+
+  async function deleteLoanPayment(loan: LoanEntry, payment: LoanPayment) {
+    if (!window.confirm("Excluir este pagamento?")) return;
+
+    if (supabaseClient && userId) {
+      setIsSavingLoanPayment(true);
+
+      try {
+        const { error } = await supabaseClient
+          .from("loan_payments")
+          .delete()
+          .eq("id", payment.id);
+
+        if (error) throw error;
+
+        const nextPayments = (loanPayments[loan.id] ?? []).filter(
+          (item) => item.id !== payment.id
+        );
+        await syncLoanPaidAmount(loan, nextPayments);
+        await Promise.all([loadLoanPayments(userId), loadPersonalLoans(userId)]);
+        setDataMessage("Pagamento excluido.");
+      } catch (error) {
+        setDataMessage(
+          errorMessage(error, "Nao foi possivel excluir o pagamento.")
+        );
+      } finally {
+        setIsSavingLoanPayment(false);
+      }
+    }
   }
 
   // Resolve a empresa do usuario mesmo que o estado `organization` ainda nao
@@ -10120,11 +10296,13 @@ export function DashmarketDashboard() {
                                 loan.principalAmount - loan.paidAmount,
                                 0
                               );
+                              const payments = loanPayments[loan.id] ?? [];
+                              const isPaying = payingLoanId === loan.id;
 
                               return (
+                                <Fragment key={loan.id}>
                                 <tr
                                   className="hover:bg-black/[0.018]"
-                                  key={loan.id}
                                 >
                                   <td className="px-4 py-3">
                                     <span
@@ -10175,6 +10353,19 @@ export function DashmarketDashboard() {
                                   <td className="px-4 py-3">
                                     <div className="flex flex-wrap gap-2">
                                       <button
+                                        className={`inline-flex h-9 items-center justify-center gap-2 rounded-lg px-3 text-sm font-bold ring-1 ${isPaying ? "bg-sea/15 text-sea ring-sea/30" : "bg-paper text-ink ring-black/10 hover:bg-black/[0.03]"}`}
+                                        onClick={() => isPaying ? cancelLoanPayment() : startLoanPayment(loan)}
+                                        type="button"
+                                      >
+                                        <CircleDollarSign aria-hidden className="h-4 w-4" />
+                                        {isPaying ? "Fechar" : "Pagamentos"}
+                                        {payments.length > 0 && (
+                                          <span className="ml-0.5 rounded-full bg-sea/20 px-1.5 py-0.5 text-[10px] font-bold text-sea leading-none">
+                                            {payments.length}
+                                          </span>
+                                        )}
+                                      </button>
+                                      <button
                                         className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-paper px-3 text-sm font-bold text-ink ring-1 ring-black/10 hover:bg-black/[0.03]"
                                         disabled={isSavingLoan}
                                         onClick={() => startEditingLoan(loan)}
@@ -10195,6 +10386,136 @@ export function DashmarketDashboard() {
                                     </div>
                                   </td>
                                 </tr>
+                                {isPaying && (
+                                  <tr className="bg-black/[0.018]">
+                                    <td colSpan={9} className="px-6 py-4">
+                                      <div className="flex flex-col gap-4">
+                                        {/* Header */}
+                                        <p className="text-sm font-bold text-ink">
+                                          {loan.direction === "lent"
+                                            ? `Pagamentos recebidos de ${loan.personName}`
+                                            : `Pagamentos realizados para ${loan.personName}`}
+                                          {" — "}
+                                          <span className="font-normal text-black/55">
+                                            Principal: {formatCurrency.format(loan.principalAmount)}
+                                            {" · "}
+                                            Pago: {formatCurrency.format(loan.paidAmount)}
+                                            {" · "}
+                                            Saldo: {formatCurrency.format(Math.max(loan.principalAmount - loan.paidAmount, 0))}
+                                          </span>
+                                        </p>
+
+                                        {/* New payment form */}
+                                        <form
+                                          className="flex flex-wrap items-end gap-3"
+                                          onSubmit={(e) => { e.preventDefault(); saveLoanPayment(loan); }}
+                                        >
+                                          <div className="flex flex-col gap-1">
+                                            <label className="text-xs font-semibold text-black/55">
+                                              {loan.direction === "lent" ? "Valor recebido (R$)" : "Valor pago (R$)"}
+                                            </label>
+                                            <input
+                                              className="h-9 w-36 rounded-lg border border-black/15 bg-paper px-3 text-sm focus:outline-none focus:ring-2 focus:ring-sea/40"
+                                              placeholder="0,00"
+                                              required
+                                              type="number"
+                                              min="0.01"
+                                              step="0.01"
+                                              value={loanPaymentForm.amount}
+                                              onChange={(e) => setLoanPaymentForm((f) => ({ ...f, amount: e.target.value }))}
+                                            />
+                                          </div>
+                                          <div className="flex flex-col gap-1">
+                                            <label className="text-xs font-semibold text-black/55">Data</label>
+                                            <input
+                                              className="h-9 rounded-lg border border-black/15 bg-paper px-3 text-sm focus:outline-none focus:ring-2 focus:ring-sea/40"
+                                              required
+                                              type="date"
+                                              value={loanPaymentForm.paidAt}
+                                              onChange={(e) => setLoanPaymentForm((f) => ({ ...f, paidAt: e.target.value }))}
+                                            />
+                                          </div>
+                                          <div className="flex flex-col gap-1 flex-1 min-w-[160px]">
+                                            <label className="text-xs font-semibold text-black/55">Observação (opcional)</label>
+                                            <input
+                                              className="h-9 w-full rounded-lg border border-black/15 bg-paper px-3 text-sm focus:outline-none focus:ring-2 focus:ring-sea/40"
+                                              placeholder="Ex: parcela 1/6"
+                                              type="text"
+                                              value={loanPaymentForm.notes ?? ""}
+                                              onChange={(e) => setLoanPaymentForm((f) => ({ ...f, notes: e.target.value }))}
+                                            />
+                                          </div>
+                                          <button
+                                            className="inline-flex h-9 items-center gap-2 rounded-lg bg-sea px-4 text-sm font-bold text-white hover:bg-sea/90 disabled:opacity-50"
+                                            disabled={isSavingLoanPayment}
+                                            type="submit"
+                                          >
+                                            <Plus aria-hidden className="h-4 w-4" />
+                                            {isSavingLoanPayment ? "Salvando…" : "Registrar"}
+                                          </button>
+                                        </form>
+
+                                        {/* Payment history */}
+                                        {payments.length > 0 && (
+                                          <table className="w-full text-sm">
+                                            <thead>
+                                              <tr className="border-b border-black/10 text-left text-xs text-black/45">
+                                                <th className="pb-2 pr-4 font-semibold">Data</th>
+                                                <th className="pb-2 pr-4 font-semibold">Valor</th>
+                                                <th className="pb-2 pr-4 font-semibold">Observação</th>
+                                                <th className="pb-2 font-semibold"></th>
+                                              </tr>
+                                            </thead>
+                                            <tbody>
+                                              {payments
+                                                .slice()
+                                                .sort((a, b) => a.paidAt.localeCompare(b.paidAt))
+                                                .map((p) => (
+                                                  <tr key={p.id} className="border-b border-black/5">
+                                                    <td className="py-2 pr-4">
+                                                      {new Date(`${p.paidAt}T00:00:00`).toLocaleDateString("pt-BR")}
+                                                    </td>
+                                                    <td className={`py-2 pr-4 font-semibold ${loan.direction === "lent" ? "text-sea" : "text-berry"}`}>
+                                                      {formatCurrency.format(p.amount)}
+                                                    </td>
+                                                    <td className="py-2 pr-4 text-black/55">
+                                                      {p.notes ?? "—"}
+                                                    </td>
+                                                    <td className="py-2">
+                                                      <button
+                                                        className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-xs font-semibold text-berry/70 hover:bg-berry/10 hover:text-berry"
+                                                        disabled={isSavingLoanPayment}
+                                                        onClick={() => deleteLoanPayment(loan, p)}
+                                                        type="button"
+                                                      >
+                                                        <Trash2 aria-hidden className="h-3 w-3" />
+                                                        Excluir
+                                                      </button>
+                                                    </td>
+                                                  </tr>
+                                                ))}
+                                            </tbody>
+                                            <tfoot>
+                                              <tr>
+                                                <td className="pt-2 text-xs text-black/45">
+                                                  {payments.length} pagamento{payments.length !== 1 ? "s" : ""}
+                                                </td>
+                                                <td className={`pt-2 text-sm font-bold ${loan.direction === "lent" ? "text-sea" : "text-berry"}`}>
+                                                  {formatCurrency.format(payments.reduce((s, p) => s + p.amount, 0))}
+                                                </td>
+                                                <td colSpan={2} />
+                                              </tr>
+                                            </tfoot>
+                                          </table>
+                                        )}
+                                        {payments.length === 0 && (
+                                          <p className="text-xs text-black/40">Nenhum pagamento registrado ainda.</p>
+                                        )}
+                                      </div>
+                                    </td>
+                                  </tr>
+                                )}
+                                </Fragment>
                               );
                             })}
                             {filteredPersonalLoans.length === 0 && (
