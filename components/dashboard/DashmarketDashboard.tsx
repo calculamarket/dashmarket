@@ -11590,136 +11590,6 @@ export function DashmarketDashboard() {
                 </section>
               </section>
 
-              <section className="rounded-lg border border-black/10 bg-white p-4 shadow-sm">
-                <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
-                  <div>
-                    <h2 className="text-lg font-bold">Busca de novos produtos</h2>
-                    <p className="text-sm text-black/60">
-                      Pesquise categorias do Mercado Livre e acompanhe concorrência, preço e evolução de vendas.
-                    </p>
-                  </div>
-                  <button
-                    className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-sea px-4 text-sm font-bold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-black/35"
-                    disabled={
-                      supabaseStatus !== "connected" ||
-                      !mercadoLivreAccount ||
-                      isSearchingOpportunities
-                    }
-                    onClick={searchMercadoLivreProductOpportunities}
-                    type="button"
-                  >
-                    <Search aria-hidden className="h-4 w-4" />
-                    {isSearchingOpportunities ? "Buscando" : "Buscar oportunidades"}
-                  </button>
-                </div>
-
-                <div className="mt-4 grid gap-3 md:grid-cols-2">
-                  <label className="grid gap-1 text-sm font-semibold">
-                    Categoria Mercado Livre
-                    <input
-                      className="h-10 rounded-lg border border-black/10 bg-paper px-3 font-normal outline-none focus:ring-4 focus:ring-sea/20"
-                      onChange={(event) =>
-                        setOpportunityForm((current) => ({
-                          ...current,
-                          categoryId: event.target.value
-                        }))
-                      }
-                      placeholder="Ex.: MLB1743"
-                      value={opportunityForm.categoryId}
-                    />
-                  </label>
-                  <label className="grid gap-1 text-sm font-semibold">
-                    Produto ou termo
-                    <input
-                      className="h-10 rounded-lg border border-black/10 bg-paper px-3 font-normal outline-none focus:ring-4 focus:ring-sea/20"
-                      onChange={(event) =>
-                        setOpportunityForm((current) => ({
-                          ...current,
-                          query: event.target.value
-                        }))
-                      }
-                      placeholder="Ex.: cabide madeira ou link MLBU/MLB"
-                      value={opportunityForm.query}
-                    />
-                  </label>
-                </div>
-
-                <div className="table-scroll mt-4 overflow-x-auto">
-                  <table className="min-w-[1100px] w-full text-left text-sm">
-                    <thead className="bg-black/[0.025] text-xs uppercase tracking-normal text-black/50">
-                      <tr>
-                        <th className="px-4 py-3">Produto</th>
-                        <th className="px-4 py-3">Preço</th>
-                        <th className="px-4 py-3">Vendas ML</th>
-                        <th className="px-4 py-3">Venda diária estimada</th>
-                        <th className="px-4 py-3">Concorrentes</th>
-                        <th className="px-4 py-3">Posição</th>
-                        <th className="px-4 py-3">Vendedor</th>
-                        <th className="px-4 py-3">Categoria</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-black/10">
-                      {filteredProductOpportunities.map((row) => (
-                        <tr className="hover:bg-black/[0.018]" key={row.id}>
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-3">
-                              {row.thumbnail && (
-                                <div
-                                  aria-hidden
-                                  className="h-12 w-12 rounded-lg bg-cover bg-center ring-1 ring-black/10"
-                                  style={{
-                                    backgroundImage: `url(${row.thumbnail})`
-                                  }}
-                                />
-                              )}
-                              <div>
-                                <p className="font-bold text-ink">{row.title}</p>
-                                <p className="mt-1 text-xs text-black/45">
-                                  {row.externalItemId}
-                                </p>
-                              </div>
-                            </div>
-                          </td>
-                          <td className="px-4 py-3 font-bold">
-                            {formatCurrency.format(row.priceAmount)}
-                          </td>
-                          <td className="px-4 py-3">
-                            {formatNumber.format(row.soldQuantity)}
-                          </td>
-                          <td className="px-4 py-3 font-bold text-sea">
-                            {formatNumber.format(row.estimatedDailySales)}
-                          </td>
-                          <td className="px-4 py-3">
-                            {formatNumber.format(row.competitorCount)}
-                          </td>
-                          <td className="px-4 py-3">
-                            {row.listingPosition
-                              ? `#${formatNumber.format(row.listingPosition)}`
-                              : "-"}
-                          </td>
-                          <td className="px-4 py-3">
-                            {row.sellerName ?? row.sellerId ?? "-"}
-                          </td>
-                          <td className="px-4 py-3">
-                            {row.categoryName ?? row.categoryId}
-                          </td>
-                        </tr>
-                      ))}
-                      {filteredProductOpportunities.length === 0 && (
-                        <tr>
-                          <td
-                            className="px-4 py-8 text-center text-black/55"
-                            colSpan={8}
-                          >
-                            Nenhuma oportunidade pesquisada ainda.
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </section>
-
               {/* ── Funil de Visitas → Conversão ── */}
               {conversionFunnel.length > 0 && (
                 <section className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
@@ -11932,6 +11802,176 @@ export function DashmarketDashboard() {
                       </div>
                     </div>
                   ))}
+                </div>
+              </section>
+            </section>
+          )}
+
+          {activeView === "oportunidades" && (
+            <section className="mt-5 grid gap-5">
+              <div className="flex flex-col gap-1">
+                <h1 className="text-2xl font-extrabold text-ink">Pesquisa de Mercado</h1>
+                <p className="text-sm text-black/55">
+                  Pesquise categorias ou produtos no Mercado Livre e acompanhe concorrência, preço e evolução de vendas.
+                </p>
+              </div>
+
+              <section className="rounded-lg border border-black/10 bg-white p-4 shadow-sm">
+                <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
+                  <div>
+                    <h2 className="text-lg font-bold">Busca de produtos</h2>
+                    <p className="text-sm text-black/60">
+                      Informe uma categoria (ex.: MLB1743), um termo de busca ou um link MLBU/MLB para analisar o mercado.
+                    </p>
+                  </div>
+                  <button
+                    className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-sea px-4 text-sm font-bold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-black/35"
+                    disabled={
+                      supabaseStatus !== "connected" ||
+                      !mercadoLivreAccount ||
+                      isSearchingOpportunities
+                    }
+                    onClick={searchMercadoLivreProductOpportunities}
+                    type="button"
+                  >
+                    <Search aria-hidden className="h-4 w-4" />
+                    {isSearchingOpportunities ? "Buscando..." : "Buscar"}
+                  </button>
+                </div>
+
+                <div className="mt-4 grid gap-3 md:grid-cols-2">
+                  <label className="grid gap-1 text-sm font-semibold">
+                    Categoria Mercado Livre
+                    <input
+                      className="h-10 rounded-lg border border-black/10 bg-paper px-3 font-normal outline-none focus:ring-4 focus:ring-sea/20"
+                      onChange={(event) =>
+                        setOpportunityForm((current) => ({
+                          ...current,
+                          categoryId: event.target.value
+                        }))
+                      }
+                      placeholder="Ex.: MLB1743"
+                      value={opportunityForm.categoryId}
+                    />
+                  </label>
+                  <label className="grid gap-1 text-sm font-semibold">
+                    Produto ou termo
+                    <input
+                      className="h-10 rounded-lg border border-black/10 bg-paper px-3 font-normal outline-none focus:ring-4 focus:ring-sea/20"
+                      onChange={(event) =>
+                        setOpportunityForm((current) => ({
+                          ...current,
+                          query: event.target.value
+                        }))
+                      }
+                      placeholder="Ex.: cabide madeira ou link MLBU/MLB"
+                      value={opportunityForm.query}
+                    />
+                  </label>
+                </div>
+              </section>
+
+              {filteredProductOpportunities.length > 0 && (
+                <section className="grid gap-3 md:grid-cols-3 xl:grid-cols-4">
+                  <div className="rounded-lg border border-black/10 bg-white p-4 shadow-sm">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-black/45">Produtos encontrados</p>
+                    <p className="mt-1 text-2xl font-extrabold text-ink">{formatNumber.format(filteredProductOpportunities.length)}</p>
+                  </div>
+                  <div className="rounded-lg border border-black/10 bg-white p-4 shadow-sm">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-black/45">Concorrentes únicos</p>
+                    <p className="mt-1 text-2xl font-extrabold text-ink">
+                      {formatNumber.format(filteredProductOpportunities[0]?.competitorCount ?? 0)}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-black/10 bg-white p-4 shadow-sm">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-black/45">Menor preço</p>
+                    <p className="mt-1 text-2xl font-extrabold text-sea">
+                      {formatCurrency.format(
+                        Math.min(...filteredProductOpportunities.map((r) => r.priceAmount))
+                      )}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-black/10 bg-white p-4 shadow-sm">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-black/45">Maior preço</p>
+                    <p className="mt-1 text-2xl font-extrabold text-ink">
+                      {formatCurrency.format(
+                        Math.max(...filteredProductOpportunities.map((r) => r.priceAmount))
+                      )}
+                    </p>
+                  </div>
+                </section>
+              )}
+
+              <section className="rounded-lg border border-black/10 bg-white shadow-sm overflow-hidden">
+                <div className="table-scroll overflow-x-auto">
+                  <table className="min-w-[1100px] w-full text-left text-sm">
+                    <thead className="bg-black/[0.025] text-xs uppercase tracking-normal text-black/50">
+                      <tr>
+                        <th className="px-4 py-3">Produto</th>
+                        <th className="px-4 py-3">Preço</th>
+                        <th className="px-4 py-3">Vendas ML</th>
+                        <th className="px-4 py-3">Venda diária est.</th>
+                        <th className="px-4 py-3">Concorrentes</th>
+                        <th className="px-4 py-3">Posição</th>
+                        <th className="px-4 py-3">Vendedor</th>
+                        <th className="px-4 py-3">Categoria</th>
+                        <th className="px-4 py-3">Link</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-black/10">
+                      {filteredProductOpportunities.map((row) => (
+                        <tr className="hover:bg-black/[0.018]" key={row.id}>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-3">
+                              {row.thumbnail && (
+                                <div
+                                  aria-hidden
+                                  className="h-12 w-12 shrink-0 rounded-lg bg-cover bg-center ring-1 ring-black/10"
+                                  style={{ backgroundImage: `url(${row.thumbnail})` }}
+                                />
+                              )}
+                              <div>
+                                <p className="font-bold text-ink leading-tight">{row.title}</p>
+                                <p className="mt-0.5 text-xs text-black/45">{row.externalItemId}</p>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 font-bold">{formatCurrency.format(row.priceAmount)}</td>
+                          <td className="px-4 py-3">{formatNumber.format(row.soldQuantity)}</td>
+                          <td className="px-4 py-3 font-bold text-sea">{formatNumber.format(row.estimatedDailySales)}</td>
+                          <td className="px-4 py-3">{formatNumber.format(row.competitorCount)}</td>
+                          <td className="px-4 py-3">
+                            {row.listingPosition ? `#${formatNumber.format(row.listingPosition)}` : "-"}
+                          </td>
+                          <td className="px-4 py-3">{row.sellerName ?? row.sellerId ?? "-"}</td>
+                          <td className="px-4 py-3">{row.categoryName ?? row.categoryId}</td>
+                          <td className="px-4 py-3">
+                            {row.permalink ? (
+                              <a
+                                className="text-sea underline hover:text-emerald-700"
+                                href={row.permalink}
+                                rel="noopener noreferrer"
+                                target="_blank"
+                              >
+                                Ver
+                              </a>
+                            ) : (
+                              "-"
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                      {filteredProductOpportunities.length === 0 && (
+                        <tr>
+                          <td className="px-4 py-10 text-center text-black/55" colSpan={9}>
+                            {supabaseStatus !== "connected" || !mercadoLivreAccount
+                              ? "Conecte o Mercado Livre para pesquisar produtos."
+                              : "Nenhuma pesquisa realizada ainda. Use os campos acima para buscar."}
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
                 </div>
               </section>
             </section>

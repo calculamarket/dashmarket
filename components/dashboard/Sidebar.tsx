@@ -17,6 +17,7 @@ import {
   Scale,
   ShieldAlert,
   Target,
+  TrendingUp,
   WalletCards
 } from "lucide-react";
 
@@ -28,6 +29,7 @@ export type ViewKey =
   | "custos"
   | "estoque"
   | "estoque_fisico"
+  | "oportunidades"
   | "ads"
   | "ads_analysis"
   | "ads_gestao"
@@ -47,6 +49,7 @@ export const views: Array<{ key: ViewKey; label: string; icon: typeof BarChart3 
   { key: "custos", label: "Centro de custos", icon: WalletCards },
   { key: "estoque", label: "Estoque Full", icon: Boxes },
   { key: "estoque_fisico", label: "Estoque Físico", icon: PackagePlus },
+  { key: "oportunidades", label: "Pesquisa de Mercado", icon: TrendingUp },
   { key: "ads", label: "Publicidade", icon: Megaphone },
   { key: "ads_analysis", label: "Análise de Anúncios", icon: Target },
   { key: "ads_gestao", label: "Gestão de ADS", icon: BarChart3 },
@@ -57,7 +60,7 @@ export const views: Array<{ key: ViewKey; label: string; icon: typeof BarChart3 
 
 const groups: Array<{ label: string; keys: ViewKey[] }> = [
   { label: "Visão Geral", keys: ["principal", "ia"] },
-  { label: "Operações", keys: ["produtos", "vendas", "custos", "estoque", "estoque_fisico"] },
+  { label: "Operações", keys: ["produtos", "vendas", "custos", "estoque", "estoque_fisico", "oportunidades"] },
   { label: "Marketing", keys: ["ads", "ads_analysis", "ads_gestao"] },
   { label: "Pós-venda", keys: ["pos_venda"] },
   { label: "Financeiro", keys: ["financeiro_empresa", "financeiro_pessoal", "conciliacao"] },
